@@ -40,7 +40,9 @@ SIMILARITY_CONFIG = {
 SKIP_TEXT_PATTERNS = [
     "水印", "版权", "©", "logo", "默认", "提示",
     "请输入", "登录", "注册", "点击", "更多",
-    "弹幕", "B站", "bilibili", "视频加载", "网络异常"
+    "弹幕", "B站", "bilibili", "视频加载", "网络异常",
+    "数码星空", "10:0081", "frame_", "人车家全生态",
+    "xlaomI", "a0mI", "PPTO", "oddo", "OPP"
 ]
 
 # 图像预处理配置

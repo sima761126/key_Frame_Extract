@@ -9,10 +9,12 @@
 3. 大模型信息提取与结构化输出
 
 用法：
-    python main.py <视频文件路径>        # 完整流程
-    python main.py --step1 <视频文件>    # 仅提取关键帧
-    python main.py --step2              # 仅运行OCR识别
-    python main.py --reextract          # 强制重新提取帧
+  python main.py video.mp4                    # 完整流程
+  python main.py video.mp4 --reextract         # 强制重新提取帧
+  python main.py --clean-pics                  # 清空pics目录
+  python main.py --step1 video.mp4             # 仅提取关键帧
+  python main.py --step2                       # 仅运行OCR识别
+  python main.py --step3                       # 仅生成结构化结果
 """
 
 import sys
@@ -24,6 +26,13 @@ from datetime import datetime
 import config
 from video_processor import VideoProcessor, extract_video_frames
 from ocr_processor import TextDetectionPipeline, TextRecognitionPipeline
+
+# 加载 .env 文件
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # 如果没有 python-dotenv，使用系统环境变量
 
 
 def step1_extract_frames(video_path: Path, force: bool = False) -> list:
@@ -109,51 +118,420 @@ def step3_extract_structured_info() -> dict:
 
 def extract_structured_info(content: str) -> dict:
     """
-    从OCR识别内容中提取结构化信息
+    从OCR识别内容中提取结构化产品信息（使用大模型调用）
 
     Args:
-        content: info.md 文件内容
+        content: info.md 文件内容（纯文本格式，每行一个文本）
 
     Returns:
         结构化数据字典
     """
-    # 提取所有文本
+    # 提取所有文本（纯文本格式，每行一个）
     all_texts = []
     for line in content.split("\n"):
         line = line.strip()
-        if line.startswith("- "):
-            text = line[2:].split("(置信度")[0].strip()
-            all_texts.append(text)
+        if line:  # 非空行
+            all_texts.append(line)
 
-    # 初始化结果
+    # 尝试使用大模型提取
+    try:
+        result = call_llm_for_structured_info(all_texts)
+        if result:
+            print("大模型提取成功")
+            return result
+    except Exception as e:
+        print(f"大模型调用失败，使用规则提取: {e}")
+
+    # 回退到规则提取（原有逻辑）
+    return extract_structured_info_rules(all_texts)
+
+
+def call_llm_for_structured_info(texts: list) -> dict:
+    """
+    调用大模型提取结构化信息
+
+    Args:
+        texts: OCR识别的文本列表
+
+    Returns:
+        结构化数据字典，失败返回None
+    """
+    import os
+    import requests
+    import json
+
+    # 构建prompt
+    prompt = build_extraction_prompt(texts)
+
+    # 尝试多种大模型接口
+    api_keys = {
+        "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY"),
+        "DASHSCOPE_API_KEY": os.environ.get("DASHSCOPE_API_KEY"),
+        "BAIDU_API_KEY": os.environ.get("BAIDU_API_KEY"),
+    }
+
+    # 优先使用通义千问（阿里云）
+    if api_keys["DASHSCOPE_API_KEY"]:
+        return call_dashscope(prompt)
+    
+    # 其次使用百度文心一言
+    if api_keys["BAIDU_API_KEY"]:
+        return call_baidu_ernie(prompt)
+    
+    # 最后使用OpenAI
+    if api_keys["OPENAI_API_KEY"]:
+        return call_openai(prompt)
+
+    print("未配置大模型API密钥，跳过大模型调用")
+    return None
+
+
+def build_extraction_prompt(texts: list) -> str:
+    """
+    构建大模型提取的prompt
+
+    Args:
+        texts: OCR识别的文本列表
+
+    Returns:
+        完整的prompt字符串
+    """
+    result_data_format = """
+{
+  "品牌": "",
+  "产品名称": "",
+  "发布日期": "产品发布会日期，时间格式xxxx-xx-xx",
+  "发售日期": "产品发售或者首销日期，时间格式xxxx-xx-xx",
+  "颜色": "字符串",
+  "处理器": "字符串，包括厂商名称和处理器代号，例如：Snapdragon 8 Gen 3",
+  "存储与内存": "字符串，只包含 RAM 和 Storage 的数字值，例如：3+64/4+128",
+  "发布价格": "根据存储和内存的配置对应的发布价格。如：8GB+128GB/2499",
+  "尺寸": "字符串，只包含 Height、Width、Thickness 的数字值，格式为\"高x宽x厚\"，例如：189x70.9x19",
+  "重量": "浮点数",
+  "屏幕尺寸": "浮点数，例如：6.55，如果有第二块屏幕，用/分隔",
+  "屏幕分辨率": "字符串，例如：\"2670 x 1200\"，如果有第二块屏幕，用/分隔",
+  "屏幕刷新率": "字符串，例如：\"120Hz\"，如果有第二块屏幕，用/分隔",
+  "屏幕面板类型": "字符串，例如：\"AMOLED, LCD\"，如果有第二块屏幕，用/分隔",
+  "屏幕背光模式": "字符串，例如：\"LTPS, LTPO\"，如果有第二块屏幕，用/分隔",
+  "后置摄像头颗数": "整数",
+  "后置摄像头像素": "字符串，只包含数字值，例如：50MP+8MP+2MP",
+  "后置摄像头规格": "字符串，相似规格用括号()包围，包含摄像头名称、光圈、OIS、sensor-shift等，不同摄像头规格换行显示",
+  "前置摄像头颗数": "整数",
+  "前置摄像头像素": "字符串，只包含数字值，例如：8MP+2MP",
+  "前置摄像头规格": "字符串，规则同后置摄像头规格",
+  "电池": "整数，例如：5000mAh",
+  "充电": "浮点数，多种充电配置间用/分隔，例如：90w有线/80w无线",
+  "其他": "包括防尘防水、NFC、卫星、传感器、指纹、冷却系统等"
+}
+"""
+
+    prompt = f"""
+你是一个产品信息提取专家。请从以下OCR识别的文本中提取产品的结构化信息。
+
+【识别到的文本内容】
+{chr(10).join(texts[:200])}
+
+【输出格式要求】
+请严格按照JSON格式输出，只输出JSON数据，不要输出其他任何内容。如果某个字段无法识别到，请留空字符串或适当的默认值。
+
+【JSON输出模板】
+{result_data_format}
+"""
+    return prompt.strip()
+
+
+def call_dashscope(prompt: str) -> dict:
+    """调用阿里云通义千问API"""
+    import os
+    import requests
+    import json
+
+    api_key = os.environ.get("DASHSCOPE_API_KEY")
+    base_url = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation")
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+    
+    data = {
+        "model": "qwen-turbo",
+        "input": {
+            "prompt": prompt
+        },
+        "parameters": {
+            "temperature": 0.1,
+            "max_tokens": 4096
+        }
+    }
+    
+    response = requests.post(base_url, headers=headers, data=json.dumps(data))
+    if response.status_code == 200:
+        result = response.json()
+        if "output" in result and "text" in result["output"]:
+            text = result["output"]["text"]
+            # 提取JSON（可能包含在markdown代码块中）
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0]
+            try:
+                return json.loads(text.strip())
+            except:
+                print(f"JSON解析失败: {text[:200]}")
+    else:
+        print(f"API调用失败: {response.status_code} - {response.text[:200]}")
+    return None
+
+
+def call_baidu_ernie(prompt: str) -> dict:
+    """调用百度文心一言API"""
+    import os
+    import requests
+    import json
+
+    api_key = os.environ.get("BAIDU_API_KEY")
+    secret_key = os.environ.get("BAIDU_SECRET_KEY")
+    
+    # 获取access_token
+    token_url = "https://aip.baidubce.com/oauth/2.0/token"
+    token_params = {
+        "grant_type": "client_credentials",
+        "client_id": api_key,
+        "client_secret": secret_key
+    }
+    token_response = requests.post(token_url, params=token_params)
+    if token_response.status_code != 200:
+        return None
+    
+    access_token = token_response.json().get("access_token")
+    if not access_token:
+        return None
+    
+    url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    params = {"access_token": access_token}
+    
+    data = {
+        "messages": [
+            {"role": "system", "content": "你是一个产品信息提取专家"},
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.1
+    }
+    
+    response = requests.post(url, headers=headers, params=params, data=json.dumps(data))
+    if response.status_code == 200:
+        result = response.json()
+        if "result" in result:
+            try:
+                return json.loads(result["result"])
+            except:
+                print(f"JSON解析失败: {result['result']}")
+    return None
+
+
+def call_openai(prompt: str) -> dict:
+    """调用OpenAI API"""
+    import os
+    import openai
+    import json
+
+    api_key = os.environ.get("OPENAI_API_KEY")
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    
+    client = openai.OpenAI(api_key=api_key, base_url=base_url)
+    
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "你是一个产品信息提取专家，只输出JSON格式的结构化数据"},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.1
+    )
+    
+    content = response.choices[0].message.content
+    try:
+        return json.loads(content)
+    except:
+        print(f"JSON解析失败: {content}")
+        return None
+
+
+def extract_structured_info_rules(texts: list) -> dict:
+    """
+    使用规则提取结构化信息（回退方案）
+
+    Args:
+        texts: OCR识别的文本列表
+
+    Returns:
+        结构化数据字典
+    """
+    # 合并所有文本用于搜索
+    full_text = "\n".join(texts)
+
+    # 初始化结果（按照用户指定的格式）
     result = {
-        "product_releases": [],
-        "product_specs": [],
-        "release_times": [],
-        "storage_specs": [],
-        "prices": [],
-        "sale_start_times": [],
-        "raw_texts": all_texts
+        "品牌": "",
+        "产品名称": "",
+        "发布日期": "",
+        "发售日期": "",
+        "颜色": "",
+        "处理器": "",
+        "存储与内存": "",
+        "发布价格": "",
+        "尺寸": "",
+        "重量": "",
+        "屏幕尺寸": "",
+        "屏幕分辨率": "",
+        "屏幕刷新率": "",
+        "屏幕面板类型": "",
+        "屏幕背光模式": "",
+        "后置摄像头颗数": 0,
+        "后置摄像头像素": "",
+        "后置摄像头规格": "",
+        "前置摄像头颗数": 0,
+        "前置摄像头像素": "",
+        "前置摄像头规格": "",
+        "电池": "",
+        "充电": "",
+        "其他": "",
+        "raw_texts": texts
     }
 
-    # 关键词匹配
-    keywords = {
-        "product_releases": ["发布会", "发布", "首发", "亮相", "揭晓"],
-        "product_specs": ["处理器", "芯片", "电池", "屏幕", "摄像头", "像素", "系统"],
-        "release_times": ["发布", "发布于", "发布时间", "发布时间"],
-        "storage_specs": ["GB", "TB", "存储", "内存", "容量"],
-        "prices": ["售价", "价格", "元", "元起", "元终于"],
-        "sale_start_times": ["开售", "上市", "发售", "开卖", "正式销售"]
-    }
+    import re
 
-    for text in all_texts:
-        for category, patterns in keywords.items():
-            if any(p in text for p in patterns):
-                if text not in result[category]:
-                    result[category].append(text)
+    # 提取品牌和产品名称
+    brands = ["小米", "红米", "Redmi", "MI", "OPPO", "vivo", "华为", "荣耀", "苹果", "iPhone", "三星", "Samsung"]
+    product_keywords = ["Max", "Ultra", "Pro", "Plus", "Note", "系列", "手机"]
+    
+    for text in texts:
+        # 识别品牌
+        for brand in brands:
+            if brand in text:
+                if not result["品牌"]:
+                    result["品牌"] = brand
+        
+        # 识别产品名称（包含产品关键词）
+        if any(keyword in text for keyword in product_keywords):
+            if not result["产品名称"]:
+                result["产品名称"] = text.strip()
 
-    # 清理空列表
-    result = {k: v for k, v in result.items() if v}
+    # 提取日期信息
+    date_patterns = [
+        r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})[日号]?',
+        r'(\d{4})年(\d{1,2})月(\d{1,2})日',
+        r'(\d{4})[-/](\d{2})[-/](\d{2})'
+    ]
+    
+    for pattern in date_patterns:
+        matches = re.findall(pattern, full_text)
+        for match in matches:
+            date_str = f"{match[0]}-{int(match[1]):02d}-{int(match[2]):02d}"
+            if not result["发布日期"]:
+                result["发布日期"] = date_str
+            elif not result["发售日期"]:
+                result["发售日期"] = date_str
+
+    # 提取价格信息
+    price_patterns = [
+        r'(\d{1,4})[,.]?(\d{3})?元',
+        r'(\d+)元起',
+        r'售价\s*(\d+)',
+        r'价格\s*(\d+)'
+    ]
+    prices = []
+    for pattern in price_patterns:
+        matches = re.findall(pattern, full_text)
+        for match in matches:
+            if isinstance(match, tuple):
+                prices.append(''.join(match))
+            else:
+                prices.append(match)
+    if prices:
+        result["发布价格"] = '/'.join(sorted(set(prices)))
+
+    # 提取存储与内存
+    storage_patterns = [
+        r'(\d+)GB\s*[+×x]\s*(\d+)GB',
+        r'(\d+)\+(\d+)\s*GB',
+        r'(\d+)G\s*/\s*(\d+)G'
+    ]
+    storages = []
+    for pattern in storage_patterns:
+        matches = re.findall(pattern, full_text)
+        for match in matches:
+            storages.append(f"{match[0]}+{match[1]}")
+    if storages:
+        result["存储与内存"] = '/'.join(sorted(set(storages)))
+
+    # 提取处理器
+    cpu_keywords = ["骁龙", "Snapdragon", "天玑", "Dimensity", "麒麟", "A18", "A17"]
+    for text in texts:
+        for keyword in cpu_keywords:
+            if keyword in text:
+                if not result["处理器"]:
+                    result["处理器"] = text.strip()
+                    break
+
+    # 提取电池容量
+    battery_pattern = r'(\d+)mAh'
+    battery_matches = re.findall(battery_pattern, full_text)
+    if battery_matches:
+        result["电池"] = f"{battery_matches[0]}mAh"
+
+    # 提取充电功率
+    charge_patterns = [
+        r'(\d+)[Ww]快充',
+        r'(\d+)[Ww]有线',
+        r'(\d+)[Ww]无线',
+        r'(\d+)[Ww]充电'
+    ]
+    charges = []
+    for pattern in charge_patterns:
+        matches = re.findall(pattern, full_text)
+        charges.extend(matches)
+    if charges:
+        result["充电"] = '/'.join(sorted(set(charges))) + "W"
+
+    # 提取屏幕尺寸
+    screen_pattern = r'(\d+\.?\d*)英寸'
+    screen_matches = re.findall(screen_pattern, full_text)
+    if screen_matches:
+        result["屏幕尺寸"] = screen_matches[0]
+
+    # 提取摄像头像素
+    camera_patterns = [
+        r'(\d+)[Mm][Pp]',
+        r'(\d+)百万像素'
+    ]
+    camera_pixels = []
+    for pattern in camera_patterns:
+        matches = re.findall(pattern, full_text)
+        camera_pixels.extend(matches)
+    if camera_pixels:
+        result["后置摄像头像素"] = '+'.join(camera_pixels[:3])
+
+    # 提取屏幕刷新率
+    refresh_pattern = r'(\d+)Hz'
+    refresh_matches = re.findall(refresh_pattern, full_text)
+    if refresh_matches:
+        result["屏幕刷新率"] = refresh_matches[0] + "Hz"
+
+    # 提取其他信息
+    other_features = []
+    other_keywords = ["NFC", "防水", "防尘", "卫星", "指纹", "散热", "冷却"]
+    for text in texts:
+        for keyword in other_keywords:
+            if keyword in text and keyword not in other_features:
+                other_features.append(keyword)
+    if other_features:
+        result["其他"] = ','.join(other_features)
+
+    # 清理空字段（保留raw_texts）
+    result = {k: v for k, v in result.items() if v or k == "raw_texts"}
 
     return result
 
@@ -177,6 +555,14 @@ def run_full_pipeline(video_path: Path, force: bool = False) -> dict:
     print("#" * 60)
 
     try:
+        # 清空pics目录
+        import shutil
+        pics_dir = config.PICS_DIR
+        if pics_dir.exists():
+            shutil.rmtree(pics_dir)
+            pics_dir.mkdir(exist_ok=True)
+            print("已清空pics目录")
+
         # 步骤1：提取关键帧
         frames = step1_extract_frames(video_path, force)
 
@@ -211,6 +597,7 @@ def main():
 示例:
   python main.py video.mp4                    # 完整流程
   python main.py video.mp4 --reextract         # 强制重新提取帧
+  python main.py --clean-pics                  # 清空pics目录
   python main.py --step1 video.mp4             # 仅提取关键帧
   python main.py --step2                       # 仅运行OCR识别
   python main.py --step3                       # 仅生成结构化结果
@@ -219,11 +606,25 @@ def main():
 
     parser.add_argument("video", nargs="?", help="视频文件路径")
     parser.add_argument("--reextract", action="store_true", help="强制重新提取关键帧")
+    parser.add_argument("--clean-pics", action="store_true", help="清空pics目录所有图片")
     parser.add_argument("--step1", action="store_true", help="仅执行步骤1：提取关键帧")
     parser.add_argument("--step2", action="store_true", help="仅执行步骤2：OCR识别")
     parser.add_argument("--step3", action="store_true", help="仅执行步骤3：结构化输出")
 
     args = parser.parse_args()
+
+    # 处理 --clean-pics 参数
+    if args.clean_pics:
+        pics_dir = config.PICS_DIR
+        if pics_dir.exists():
+            import shutil
+            count = len(list(pics_dir.glob("*.jpg")))
+            shutil.rmtree(pics_dir)
+            pics_dir.mkdir(exist_ok=True)
+            print(f"已清空pics目录，删除了 {count} 张图片")
+        else:
+            print("pics目录不存在，无需清空")
+        return
 
     # 步骤1单独执行
     if args.step1:

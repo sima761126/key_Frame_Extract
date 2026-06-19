@@ -159,10 +159,12 @@ class OCRProcessor:
                     confidence = line[1][1]
 
                     if confidence >= self.ocr_config["confidence_threshold"]:
-                        recognized.append({
-                            "text": text,
-                            "confidence": confidence
-                        })
+                        # 过滤无价值文本（水印、噪声等）
+                        if self._is_valuable_text(text):
+                            recognized.append({
+                                "text": text,
+                                "confidence": confidence
+                            })
 
             return recognized
 
@@ -327,18 +329,11 @@ class TextRecognitionPipeline:
         return results
 
     def _save_results(self, results: List[Dict]) -> None:
-        """保存识别结果到info.md"""
+        """保存识别结果到info.md（纯文本列表格式）"""
         with open(self.output_files["info"], "w", encoding="utf-8") as f:
             for item in results:
-                f.write(f"## {item['filename']}\n\n")
                 for text in item["texts"]:
-                    # 查找对应的置信度
-                    conf = next(
-                        (r["confidence"] for r in item["confidence"] if r["text"] == text),
-                        0.0
-                    )
-                    f.write(f"- {text} (置信度: {conf:.2f})\n")
-                f.write("\n")
+                    f.write(f"{text}\n")
 
 
 def run_text_detection(frame_list: List[Path] = None) -> List[Path]:
