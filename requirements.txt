@@ -1,0 +1,37 @@
+# ============================================
+# 视频关键帧提取与文字识别处理流程
+# ============================================
+
+# PaddlePaddle 深度学习框架
+# 【CPU 版本】（推荐，适用于没有 NVIDIA GPU 的电脑）
+paddlepaddle==3.0.0
+
+# 【GPU 版本】（适用于有 NVIDIA GPU 的电脑）
+# paddlepaddle-gpu==3.0.0  # 需要CUDA支持
+
+# PaddleOCR 文字识别库
+paddleocr==2.9.1
+
+# 视频处理
+ffmpeg-python>=0.2.0          # FFmpeg Python 绑定
+
+# 图像处理
+opencv-python>=4.11.0          # OpenCV 图像处理
+numpy>=1.26.0                 # 数值计算
+
+# 进度条显示
+tqdm>=4.65.0
+
+# ============================================
+# 安装说明
+# ============================================
+# 1. 确保已安装 FFmpeg 并添加到系统 PATH
+#    Windows: https://ffmpeg.org/download.html
+#
+# 2. 安装依赖:
+#    pip install -r requirements.txt
+#
+# 3. 如果遇到网络问题，可使用国内镜像:
+#    pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# ============================================
