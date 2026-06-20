@@ -16,12 +16,14 @@
   python main.py --step2                       # 仅运行OCR识别
   python main.py --step3                       # 仅生成结构化结果
 """
-
+import os
 import sys
 import json
 import argparse
 from pathlib import Path
 from datetime import datetime
+
+import dashscope
 
 import config
 from video_processor import VideoProcessor, extract_video_frames
@@ -29,9 +31,11 @@ from ocr_processor import TextDetectionPipeline, TextRecognitionPipeline
 
 # 加载 .env 文件
 try:
+    # pyrefly: ignore [missing-import]
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
+    print("没有设置python-dotenv")
     pass  # 如果没有 python-dotenv，使用系统环境变量
 
 
@@ -77,7 +81,6 @@ def step2_ocr_processing(frame_list: list = None) -> tuple:
     # 第二阶段：文本识别
     recognition_pipeline = TextRecognitionPipeline()
     ocr_results = recognition_pipeline.run_recognition(havetext_list)
-
     return havetext_list, ocr_results
 
 
@@ -110,6 +113,14 @@ def step3_extract_structured_info() -> dict:
     result_path = config.OUTPUT_FILES["result"]
     with open(result_path, "w", encoding="utf-8") as f:
         json.dump(structured_data, f, ensure_ascii=False, indent=2)
+
+    # 提取摘要信息
+    summary_data = call_llm_for_summary_info(content)
+
+    # 保存结果
+    result_path = config.OUTPUT_FILES["summary"]
+    with open(result_path, "w", encoding="utf-8") as f:
+        f.write(json.dumps(summary_data, ensure_ascii=False, indent=2))
 
     print(f"结构化结果已保存至: {result_path}")
 
@@ -186,6 +197,46 @@ def call_llm_for_structured_info(texts: list) -> dict:
     return None
 
 
+def call_llm_for_summary_info(texts: list) -> dict:
+    """
+    调用大模型提取摘要信息
+
+    Args:
+        texts: OCR识别的文本列表
+
+    Returns:
+        结构化数据字典，失败返回None
+    """
+    import os
+    import requests
+    import json
+
+    # 构建prompt
+    prompt = build_summary_prompt(texts)
+
+    # 尝试多种大模型接口
+    api_keys = {
+        "OPENAI_API_KEY": os.environ.get("OPENAI_API_KEY"),
+        "DASHSCOPE_API_KEY": os.environ.get("DASHSCOPE_API_KEY"),
+        "BAIDU_API_KEY": os.environ.get("BAIDU_API_KEY"),
+    }
+
+    # 优先使用通义千问（阿里云）
+    if api_keys["DASHSCOPE_API_KEY"]:
+        return call_dashscope_text(prompt)
+
+    # 其次使用百度文心一言
+    if api_keys["BAIDU_API_KEY"]:
+        return call_baidu_ernie(prompt)
+
+    # 最后使用OpenAI
+    if api_keys["OPENAI_API_KEY"]:
+        return call_openai(prompt)
+
+    print("未配置大模型API密钥，跳过大模型调用")
+    return None
+
+
 def build_extraction_prompt(texts: list) -> str:
     """
     构建大模型提取的prompt
@@ -229,60 +280,234 @@ def build_extraction_prompt(texts: list) -> str:
 你是一个产品信息提取专家。请从以下OCR识别的文本中提取产品的结构化信息。
 
 【识别到的文本内容】
-{chr(10).join(texts[:200])}
+{chr(10).join(texts)}
 
 【输出格式要求】
 请严格按照JSON格式输出，只输出JSON数据，不要输出其他任何内容。如果某个字段无法识别到，请留空字符串或适当的默认值。
 
+
 【JSON输出模板】
 {result_data_format}
+如果有多个产品,则表示为list结构
+{[result_data_format,]}
 """
     return prompt.strip()
 
 
-def call_dashscope(prompt: str) -> dict:
-    """调用阿里云通义千问API"""
-    import os
-    import requests
-    import json
+def build_summary_prompt(texts: list) -> str:
+    """
+    构建大模型提取的prompt
 
-    api_key = os.environ.get("DASHSCOPE_API_KEY")
-    base_url = os.environ.get("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation")
-    
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-    
-    data = {
-        "model": "qwen-turbo",
-        "input": {
-            "prompt": prompt
-        },
-        "parameters": {
-            "temperature": 0.1,
-            "max_tokens": 4096
-        }
-    }
-    
-    response = requests.post(base_url, headers=headers, data=json.dumps(data))
-    if response.status_code == 200:
-        result = response.json()
-        if "output" in result and "text" in result["output"]:
-            text = result["output"]["text"]
-            # 提取JSON（可能包含在markdown代码块中）
+    Args:
+        texts: OCR识别的文本列表
+
+    Returns:
+        完整的prompt字符串
+    """
+    result_data_format = """
+请根据以下发布会视频/文字记录，生成一份**完整的发布会内容总结报告**：
+
+【发布会名称】：
+【发布时间】：
+【视频来源/链接】：（如有）
+
+请从以下维度进行总结：
+
+**一、发布会整体概况**
+- 发布会主题/Slogan
+- 整场时长
+- 整体基调（技术硬核/情感共鸣/年轻潮流等）
+- 开场亮点描述
+
+**二、产品核心信息汇总**
+- 产品名称及定位
+- 产品设计理念/故事
+- 产品外观描述
+
+**三、核心卖点总结（分点列出，含具体数据）**
+1. 卖点名称 + 技术原理简述 + 具体数据/参数
+2. 卖点名称 + 技术原理简述 + 具体数据/参数
+3. ...
+（每个卖点标注：演示方式、观众反应、与上代/竞品对比）
+
+**四、完整规格参数表**
+| 项目 | 规格参数 |
+|------|----------|
+| 屏幕 | |
+| 处理器 | |
+| 内存/存储 | |
+| 电池/续航 | |
+| 摄像头 | |
+| 尺寸/重量 | |
+| 连接性 | |
+| 其他 | |
+
+**五、价格与购买信息**
+- 各版本/配置及对应价格（表格形式）
+- 开售时间（精确到时间点）
+- 购买渠道
+- 预售福利/优惠活动
+- 分期/以旧换新政策（如有）
+
+**六、发布会关键节点时间线**
+| 时间点 | 环节内容 | 关键信息/金句 |
+|--------|----------|---------------|
+| 00:00 | | |
+| ... | | |
+
+**七、重要信息提取**
+- 3个最令人印象深刻的瞬间
+- 2个最具传播性的话题/金句
+- 1个可能的争议点或槽点
+
+**八、总结评价**
+- 发布会的亮点与不足
+- 产品竞争力简要分析
+- 目标用户画像
+"""
+
+    prompt = f"""
+你是一个产品信息提取专家。请从以下OCR识别的文本中提取产品的结构化信息。
+
+【识别到的文本内容】
+{chr(10).join(texts)}
+
+【输出格式要求】
+请严格按照md格式输出，{result_data_format}，对信息进行总结
+
+"""
+    return prompt.strip()
+
+
+
+def call_dashscope(prompt: str) -> dict:
+    """
+    使用 dashscope SDK 调用阿里云通义千问 API。
+    支持从环境变量读取 API Key，并返回解析后的 JSON 对象。
+    """
+    print("使用千问大模型 (SDK方式)")
+    # print(prompt)
+    # 构建符合 SDK 要求的 messages 格式
+    messages = [
+        {'role': 'system',
+         'content': '''作为手机终端数据处理专家，你的任务是严格按照规范处理数据，确保关键信息不丢失。
+                        没有明确规范或具体内容时，不要假设任何信息；必要时保留字段为空。
+                        专业术语无需翻译'''
+         },
+        {'role': 'user',
+         'content':  """
+                        所有键必须为中文，值之间不要有额外的空格。值的类型保持字符串，不再分割。
+                        严格按照以下 JSON 格式输出："""+ prompt
+         }
+    ]
+
+    try:
+        # 使用 dashscope.Generation.call 进行调用
+        response = dashscope.Generation.call(
+            api_key=os.getenv('DASHSCOPE_API_KEY'),
+            model="qwen-plus",  # 可按需更换模型，如 qwen-turbo, qwen-max
+            messages=messages,
+            result_format='message',  # 使用 message 格式便于解析
+            temperature=0.1,
+            max_tokens=4096
+        )
+
+        # 检查响应状态
+        if response.status_code == 200:
+            # 从响应中提取文本内容
+            # print(response)
+            output_text = response.output.choices[0].message.content
+            # print(f"原始响应内容: {output_text[:200]}...")  # 打印前200字符用于调试
+
+            # 尝试提取并解析 JSON（处理可能包含在 markdown 代码块中的情况）
+            text = output_text
             if "```json" in text:
                 text = text.split("```json")[1].split("```")[0]
             elif "```" in text:
                 text = text.split("```")[1].split("```")[0]
-            try:
-                return json.loads(text.strip())
-            except:
-                print(f"JSON解析失败: {text[:200]}")
-    else:
-        print(f"API调用失败: {response.status_code} - {response.text[:200]}")
-    return None
 
+            # 解析 JSON
+            parsed_json = json.loads(text.strip())
+            print("解析成功。")
+            return parsed_json
+        else:
+            print(f"API调用失败: {response.status_code} - {response.message}")
+            return None
+
+    except dashscope.ApiError as e:
+        print(f"DashScope API 错误: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"JSON解析失败: {e}. 原始内容: {output_text[:200]}")
+        return None
+    except Exception as e:
+        print(f"发生未知错误: {e}")
+        return None
+
+
+def call_dashscope_text(prompt: str) -> dict:
+    """
+    使用 dashscope SDK 调用阿里云通义千问 API。
+    支持从环境变量读取 API Key，并返回解析后的 MD 对象。
+    """
+    print("使用千问大模型 (SDK方式)")
+    # print('call_dashscope_text:',prompt)
+    # 构建符合 SDK 要求的 messages 格式
+    messages = [
+        {'role': 'system',
+         'content': '''作为手机终端数据处理专家，你的任务是严格按照规范处理数据，确保关键信息不丢失。
+                        没有明确规范或具体内容时，不要假设任何信息；必要时保留字段为空。
+                        专业术语无需翻译'''
+         },
+        {'role': 'user',
+         'content':  """
+                        所有键必须为中文，值之间不要有额外的空格。值的类型保持字符串，不再分割。
+                        严格按照 MD 格式输出："""+ prompt
+         }
+    ]
+    # print('call_dashscope_text:', messages)
+    try:
+        # 使用 dashscope.Generation.call 进行调用
+        response = dashscope.Generation.call(
+            api_key=os.getenv('DASHSCOPE_API_KEY'),
+            model="qwen-plus",  # 可按需更换模型，如 qwen-turbo, qwen-max
+            messages=messages,
+            result_format='message',  # 使用 message 格式便于解析
+            temperature=0.1,
+            max_tokens=4096
+        )
+
+        # 检查响应状态
+        if response.status_code == 200:
+            # 从响应中提取文本内容
+            # print(response)
+            output_text = response.output.choices[0].message.content
+            # print(f"原始响应内容: {output_text}...")  # 打印前200字符用于调试
+
+            # 尝试提取并解析 JSON（处理可能包含在 markdown 代码块中的情况）
+            text = output_text
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```markdown" in text:
+                text = text.split("```markdown")[1].split("```")[0]
+
+            # 解析 JSON
+            parsed_content = text.strip()
+            print("解析成功。")
+            return parsed_content
+        else:
+            print(f"API调用失败: {response.status_code} - {response.message}")
+            return None
+
+    # except dashscope.ApiError as e:
+    #     print(f"DashScope API 错误: {e}")
+    #     return None
+    except json.JSONDecodeError as e:
+        print(f"JSON解析失败: {e}. 原始内容: {output_text[:200]}")
+        return None
+    except Exception as e:
+        print(f"发生未知错误: {e}")
+        return None
 
 def call_baidu_ernie(prompt: str) -> dict:
     """调用百度文心一言API"""
@@ -421,7 +646,7 @@ def extract_structured_info_rules(texts: list) -> dict:
 
     # 提取日期信息
     date_patterns = [
-        r'(\d{4})[-/年](\d{1,2})[-/月](\d{1,2})[日号]?',
+        r'(\d{4})[-/年](\d{1,2})[-/月](\d{ 1,2})[日号]?',
         r'(\d{4})年(\d{1,2})月(\d{1,2})日',
         r'(\d{4})[-/](\d{2})[-/](\d{2})'
     ]

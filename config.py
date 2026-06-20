@@ -10,7 +10,8 @@ PICS_DIR = BASE_DIR / "pics"
 OUTPUT_FILES = {
     "havetext": BASE_DIR / "havetext.md",   # 包含文字的图片列表
     "info": BASE_DIR / "info.md",            # OCR识别结果
-    "result": BASE_DIR / "result.json"       # 结构化JSON结果
+    "result": BASE_DIR / "result.json",       # 结构化JSON结果
+    "summary": BASE_DIR / "summary.md"  # md文档
 }
 
 # FFmpeg 视频帧提取配置

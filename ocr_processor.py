@@ -185,7 +185,7 @@ class OCRProcessor:
         """
         return SequenceMatcher(None, text1, text2).ratio()
 
-    def merge_texts(self, prev_texts: List[str], curr_texts: List[str]) -> List[str]:
+    def similarity_check(self,  prev_texts: List[str], curr_texts: List[str]) -> List[str]:
         """
         合并相邻帧的文本
         相似度超过阈值时进行去重优化
@@ -195,12 +195,11 @@ class OCRProcessor:
             curr_texts: 当前图片的文本列表
 
         Returns:
-            合并后的文本列表
+            合并后的文本列表（即更新后的result_texts）
         """
-        if not prev_texts:
-            return curr_texts
-        if not curr_texts:
-            return prev_texts
+
+        result_texts = []
+        is_replace = False
 
         # 连接所有文本进行比较
         prev_combined = " ".join(prev_texts)
@@ -211,13 +210,14 @@ class OCRProcessor:
         # 相似度超过阈值
         if similarity > self.similarity_threshold:
             # 保留信息量更多的那个
-            if len(prev_combined) >= len(curr_combined):
-                return prev_texts
-            else:
-                return curr_texts
+            if len(prev_combined) < len(curr_combined):
+                is_replace = True
+                result_texts = curr_texts
+        else:
+            # 相似度不高，直接增加
+            result_texts = curr_texts
 
-        # 相似度不高，合并
-        return prev_texts + curr_texts
+        return result_texts,is_replace
 
 
 class TextDetectionPipeline:
@@ -301,26 +301,41 @@ class TextRecognitionPipeline:
 
         results = []
         prev_texts = []
+        merged_texts = []
 
         for i, img_path in enumerate(tqdm(havetext_list, desc="文本识别")):
+            # print('文本识别:', img_path)
             curr_texts_raw = self.processor.recognize_text(img_path)
             curr_texts = [item["text"] for item in curr_texts_raw]
-
             # 合并文本
-            merged_texts = self.processor.merge_texts(prev_texts, curr_texts)
+            result_texts,is_replace = self.processor.similarity_check(prev_texts, curr_texts)
 
+            # if is_replace:
+            #     prev_set = set(prev_texts)
+            #     merged_texts = [x for x in merged_texts if x not in prev_set]
+            # merged_texts.extend(result_texts)
+            # print('文本识别13', merged_texts)
             # 保存结果
-            if merged_texts != prev_texts:  # 只保存有变化的
-                results.append({
-                    "filename": img_path.name,
-                    "texts": merged_texts,
-                    "confidence": curr_texts_raw
-                })
-                prev_texts = merged_texts
+            if result_texts == []:
+                prev_texts = curr_texts
             else:
-                prev_texts = merged_texts
+                prev_texts = result_texts
+                if is_replace:
+                    results[-1]["texts"] = ''
 
-        # 保存到info.md
+            results.append({
+                "filename": img_path.name,
+                "texts": result_texts,
+                "confidence": curr_texts_raw
+            })
+        # if isinstance(results, dict):
+        #     results['texts'] = merged_texts
+        # elif isinstance(results, list):
+        #     # 如果是列表，根据约定存放到特定位置
+        #     results.append(merged_texts)
+
+        # print(type(results),results)
+            # 保存到info.md
         self._save_results(results)
 
         print(f"识别完成: {len(results)} 个有效帧")
@@ -332,8 +347,15 @@ class TextRecognitionPipeline:
         """保存识别结果到info.md（纯文本列表格式）"""
         with open(self.output_files["info"], "w", encoding="utf-8") as f:
             for item in results:
-                for text in item["texts"]:
-                    f.write(f"{text}\n")
+                if isinstance(item, dict):
+                    # print('item:', item)
+                    for text in item["texts"]:
+                        f.write(f"{text}\n")
+                # elif isinstance(item, list):
+                #     print('item1:', item)
+                #     for text in item:
+                #         f.write(f"{text}\n")
+
 
 
 def run_text_detection(frame_list: List[Path] = None) -> List[Path]:
