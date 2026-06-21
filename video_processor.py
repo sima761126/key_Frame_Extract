@@ -10,6 +10,7 @@ import re
 import json
 from pathlib import Path
 from typing import Optional, List
+from tqdm import tqdm
 import config
 
 
@@ -95,33 +96,6 @@ class VideoProcessor:
         else:
             return f"{minutes:02d}:{secs:02d}"
 
-    def _update_progress(self, current: float, total: float, frame_count: int = 0):
-        """更新单行进度显示"""
-        if total is None or total <= 0:
-            # 没有总时长信息，只显示已处理时间
-            progress_text = f"⏳ 处理中: {self._format_time(current)}"
-            if frame_count > 0:
-                progress_text += f" | 已提取: {frame_count} 帧"
-            sys.stdout.write(f"\r{progress_text}")
-        else:
-            # 计算百分比
-            percentage = min(100, (current / total) * 100)
-            bar_length = 40
-            filled_length = int(bar_length * percentage / 100)
-            bar = '█' * filled_length + '░' * (bar_length - filled_length)
-
-            progress_text = (
-                f"\r⏳ 提取关键帧: [{bar}] "
-                f"{percentage:5.1f}% | "
-                f"{self._format_time(current)} / {self._format_time(total)}"
-            )
-            if frame_count > 0:
-                progress_text += f" | 已提取: {frame_count} 帧"
-
-            sys.stdout.write(progress_text)
-
-        sys.stdout.flush()
-
     def extract_frames(
         self,
         input_video: Path,
@@ -163,7 +137,7 @@ class VideoProcessor:
                 f.unlink()
             print("🗑️ 已清理旧帧图片")
 
-        # 执行FFmpeg命令 - 使用二进制模式
+        # 执行FFmpeg命令
         print(f"📹 正在处理: {input_video.name}")
         cmd = self._build_ffmpeg_command(input_video, self.pics_dir)
 
@@ -171,20 +145,37 @@ class VideoProcessor:
         total_duration = self._get_video_duration(input_video)
 
         try:
-            # 启动进程 - 使用二进制模式避免编码问题
+            # 启动进程 - 移除bufsize=1，使用默认缓冲
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=1
+                stderr=subprocess.PIPE
             )
 
-            # 记录已提取的帧数（从输出文件名判断）
+            # 记录已提取的帧数
             frame_count = 0
             last_progress = 0
+            current_time = 0
 
-            # 显示初始进度
-            self._update_progress(0, total_duration, frame_count)
+            # 创建进度条 - 修复格式化问题
+            if total_duration:
+                # 如果有总时长，显示基于时间的进度条
+                pbar = tqdm(
+                    total=total_duration,
+                    desc="提取关键帧",
+                    unit="s",
+                    bar_format="{desc}: [{bar}] {percentage:3.1f}% | {n:.1f}/{total:.1f}s [{elapsed}<{remaining}]",
+                    ncols=80
+                )
+            else:
+                # 如果没有总时长，使用无限进度条
+                pbar = tqdm(
+                    total=None,
+                    desc="提取关键帧",
+                    unit="帧",
+                    bar_format="{desc}: {n} 帧 [{elapsed}]",
+                    ncols=80
+                )
 
             # 读取stderr获取进度信息（FFmpeg默认输出进度到stderr）
             while True:
@@ -215,34 +206,45 @@ class VideoProcessor:
                             else:
                                 current_time = float(time_str)
 
-                            # 更新进度（每隔0.5秒更新一次，减少刷新频率）
-                            if current_time - last_progress >= 0.5:
-                                self._update_progress(current_time, total_duration, frame_count)
-                                last_progress = current_time
+                            # 更新进度条
+                            if total_duration:
+                                # 基于时间的进度
+                                if current_time - last_progress >= 0.5:
+                                    pbar.update(current_time - last_progress)
+                                    last_progress = current_time
                     except:
                         pass
 
                 # 解析帧数（提取的关键帧数量）
-                if "frame=" in line_str and "I" in line_str:
+                if "frame=" in line_str:
                     try:
-                        # 有时FFmpeg会输出 "frame=  123 I"
+                        # 有时FFmpeg会输出 "frame=  123"
                         frame_match = re.search(r'frame=\s*(\d+)', line_str)
                         if frame_match:
                             frame_count = int(frame_match.group(1))
+                            # 更新进度条描述（仅当没有时间信息时）
+                            if not total_duration and frame_count % 10 == 0:
+                                pbar.update(10)
                     except:
                         pass
+
+                # 检测是否完成
+                if "progress=end" in line_str:
+                    break
 
             # 等待进程结束
             process.wait()
 
-            # 完成进度 - 使用最后状态
-            self._update_progress(
-                total_duration if total_duration else 1,
-                total_duration,
-                frame_count
-            )
-            print()  # 换行
+            # 确保进度条完成
+            if total_duration and current_time > 0:
+                remaining = total_duration - current_time
+                if remaining > 0:
+                    pbar.update(remaining)
 
+            # 关闭进度条
+            pbar.close()
+
+            # 检查执行结果
             if process.returncode != 0:
                 # 读取错误信息
                 stderr = process.stderr.read() if process.stderr else b''
@@ -250,13 +252,11 @@ class VideoProcessor:
                 raise RuntimeError(f"FFmpeg执行失败: {error_msg[:200]}")
 
         except FileNotFoundError:
-            print()  # 换行
             raise EnvironmentError(
                 "❌ FFmpeg未安装或未添加到PATH，请先安装FFmpeg\n"
                 "下载地址: https://ffmpeg.org/download.html"
             )
         except Exception as e:
-            print()  # 换行
             raise
 
         # 获取提取的图片列表
