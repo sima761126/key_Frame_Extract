@@ -373,7 +373,8 @@ def build_summary_prompt(texts: list) -> str:
 {chr(10).join(texts)}
 
 【输出格式要求】
-请严格按照md格式输出，{result_data_format}，对信息进行总结
+请严格按照md格式输出，{result_data_format}，对信息进行总结，输出文本转换为格式规范的 Markdown 文档，
+自动提取标题、添加列表和加粗重点
 
 """
     return prompt.strip()
