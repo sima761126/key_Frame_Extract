@@ -6,7 +6,10 @@
 2. 图片文字识别（使用PaddleOCR）
    - 第一阶段：文本检测
    - 第二阶段：文本识别与相似度比较
-3. 大模型信息提取与结构化输出
+3. 语音识别（使用Whisper）
+   - 音频提取与切片
+   - 语音转文字
+4. 大模型信息提取与结构化输出
 
 用法：
   python main.py video.mp4                    # 完整流程
@@ -14,9 +17,11 @@
   python main.py --clean-pics                  # 清空pics目录
   python main.py --step1 video.mp4             # 仅提取关键帧
   python main.py --step2                       # 仅运行OCR识别
-  python main.py --step3                       # 仅生成结构化结果
+  python main.py --step3 video.mp4             # 仅运行语音识别
+  python main.py --step4                       # 仅生成结构化结果
 """
 import os
+os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 import sys
 import json
 import argparse
@@ -28,6 +33,7 @@ import dashscope
 import config
 from video_processor import VideoProcessor, extract_video_frames
 from ocr_processor import TextDetectionPipeline, TextRecognitionPipeline
+from voice_processor import VoiceProcessor
 
 # 加载 .env 文件
 try:
@@ -84,17 +90,179 @@ def step2_ocr_processing(frame_list: list = None) -> tuple:
     return havetext_list, ocr_results
 
 
-def step3_extract_structured_info() -> dict:
-    """
-    步骤3：大模型信息提取与结构化输出
+# def step3_voice_transcription(video_path: Path = None) -> None:
+#     """
+#     步骤3：语音识别处理
+#
+#     将视频中的语音转换为文字，保存到voice.md
+#
+#     Args:
+#         video_path: 视频文件路径，None时尝试从pics目录推断
+#     """
+#     print("\n" + "=" * 60)
+#     print("步骤3: 语音识别处理")
+#     print("=" * 60)
+#
+#     # 检查 Whisper 是否可用
+#     try:
+#         import whisper
+#     except ImportError:
+#         print("错误: faster-whisper 未安装，请运行: pip install openai-whisper torch")
+#         return
+#
+#     voice_processor = VoiceProcessor()
+#
+#     # 如果没有提供视频路径，尝试从config获取
+#     if video_path is None:
+#         # 从pics目录查找对应的视频文件
+#         pics_dir = config.PICS_DIR
+#         if not pics_dir.exists():
+#             print("错误: pics目录不存在，无法推断视频路径")
+#             return
+#
+#         # 查找现有的jpg文件（关键帧）
+#         frames = sorted(pics_dir.glob("*.jpg"))
+#         if not frames:
+#             print("错误: pics目录中没有帧图片，无法推断视频路径")
+#             return
+#
+#         print("提示: 未提供视频路径，请使用 --step3 <视频路径> 指定")
+#         return
 
-    对 info.md 内容进行分析，提取结构化信息
+    # # 导入音频处理器
+    # from audio_processor import AudioProcessor
+    #
+    # video = Path(video_path)
+    # if not video.exists():
+    #     print(f"错误: 视频文件不存在: {video}")
+    #     return
+    #
+    # # 提取音频
+    # audio_proc = AudioProcessor()
+    # audio_path = audio_proc.extract_audio(video)
+    #
+    # # 切片（每分钟）
+    # segments = audio_proc.segment_audio(audio_path, segment_duration=60)
+    #
+    # if not segments:
+    #     print("错误: 未能生成音频切片")
+    #     return
+    #
+    # # 转录音频
+    # print(f"\n开始转录 {len(segments)} 个音频切片...")
+    # results = voice_processor.transcribe_segments(segments)
+    #
+    # # 保存结果
+    # voice_md_path = config.OUTPUT_FILES["voice"]
+    # voice_processor.save_to_markdown(results, voice_md_path)
+    #
+    # print(f"语音识别完成: {voice_md_path}")
+
+def step3_voice_transcription(video_path: Path = None, model_name: str = "base") -> None:
+    """
+    步骤3：语音识别处理
+
+    将视频中的语音转换为文字，保存到voice.md。
+    如果本地不存在指定的 Whisper 模型，会自动从网上下载到本地缓存。
+
+    Args:
+        video_path: 视频文件路径，None时尝试从pics目录推断
+        model_name: Whisper 模型名称 (如 "tiny", "base", "small", "medium", "large")
+    """
+    print("\n" + "=" * 60)
+    print("步骤3: 语音识别处理")
+    print("=" * 60)
+
+    # 1. 检查并自动下载 faster-whisper 模型
+    local_model_dir = Path(f"models/faster-whisper-{model_name}")
+    required_files = ["config.json", "model.bin", "tokenizer.json", "vocabulary.txt"]
+
+    # 检查本地文件是否完整
+    files_exist = all((local_model_dir / file).exists() for file in required_files)
+
+    if not files_exist:
+        print(f"提示: 本地模型 [{model_name}] 不存在或不完整，正在自动下载...")
+        print(f"下载进度可能需要一些时间，请耐心等待...")
+        try:
+            import os
+            from huggingface_hub import snapshot_download
+
+            repo_id = f"Systran/faster-whisper-{model_name}"
+
+            snapshot_download(
+                repo_id=repo_id,
+                local_dir=str(local_model_dir),
+                local_dir_use_symlinks=False,  # 确保下载为实体文件而非符号链接
+                resume_download=True  # 支持断点续传
+            )
+            print(f"✅ 模型 [{model_name}] 下载并校验成功！")
+        except ImportError:
+            print("❌ 错误: 缺少 huggingface_hub 库，请运行: pip install huggingface_hub")
+            return
+        except Exception as e:
+            print(f"❌ 错误: 模型下载失败，请检查网络连接。错误信息: {e}")
+            return
+    else:
+        print(f"提示: 检测到本地已有完整模型 [{model_name}]，直接使用本地缓存。")
+
+    # 2. 初始化语音处理器
+    voice_processor = VoiceProcessor()
+
+    # 3. 视频路径处理逻辑
+    if video_path is None:
+        pics_dir = config.PICS_DIR
+        if not pics_dir.exists():
+            print("错误: pics目录不存在，无法推断视频路径")
+            return
+
+        frames = sorted(pics_dir.glob("*.jpg"))
+        if not frames:
+            print("错误: pics目录中没有帧图片，无法推断视频路径")
+            return
+
+        print("提示: 未提供视频路径，请使用 --step3 <视频路径> 指定")
+        return
+
+    # 4. 导入音频处理器并处理视频
+    from audio_processor import AudioProcessor
+
+    video = Path(video_path)
+    if not video.exists():
+        print(f"错误: 视频文件不存在: {video}")
+        return
+
+    # 提取音频
+    audio_proc = AudioProcessor()
+    audio_path = audio_proc.extract_audio(video)
+
+    # 切片（每分钟）
+    segments = audio_proc.segment_audio(audio_path, segment_duration=60)
+
+    if not segments:
+        print("错误: 未能生成音频切片")
+        return
+
+    # 5. 转录音频
+    print(f"\n开始转录 {len(segments)} 个音频切片...")
+    results = voice_processor.transcribe_segments(segments)
+
+    # 6. 保存结果
+    voice_md_path = config.OUTPUT_FILES["voice"]
+    voice_processor.save_to_markdown(results, voice_md_path)
+
+    print(f"语音识别完成: {voice_md_path}")
+
+def step4_extract_structured_info() -> dict:
+    """
+    步骤4：大模型信息提取与结构化输出
+
+    对 info.md 和 voice.md 内容进行分析，提取结构化信息
 
     Returns:
         结构化数据字典
     """
     print("\n" + "=" * 60)
-    print("步骤3: 大模型信息提取")
+    print("步骤4: 大模型信息提取")
     print("=" * 60)
 
     info_path = config.OUTPUT_FILES["info"]
@@ -102,12 +270,20 @@ def step3_extract_structured_info() -> dict:
         print("info.md 不存在，请先运行OCR识别")
         return {}
 
-    # 读取识别结果
+    # 读取识别结果（图片文字）
     with open(info_path, "r", encoding="utf-8") as f:
-        content = f.read()
+        info_content = f.read()
+
+    # 读取语音识别结果（如果存在）
+    voice_content = ""
+    voice_path = config.OUTPUT_FILES["voice"]
+    if voice_path.exists():
+        with open(voice_path, "r", encoding="utf-8") as f:
+            voice_content = f.read()
+
 
     # 提取结构化信息（基于规则的关键信息提取）
-    structured_data = extract_structured_info(content)
+    structured_data = extract_structured_info(info_content, voice_content)
 
     # 保存结果
     result_path = config.OUTPUT_FILES["result"]
@@ -115,7 +291,7 @@ def step3_extract_structured_info() -> dict:
         json.dump(structured_data, f, ensure_ascii=False, indent=2)
 
     # 提取摘要信息
-    summary_data = call_llm_for_summary_info(content)
+    summary_data = call_llm_for_summary_info(info_content, voice_content)
 
     # 保存结果
     result_path = config.OUTPUT_FILES["summary"]
@@ -127,22 +303,33 @@ def step3_extract_structured_info() -> dict:
     return structured_data
 
 
-def extract_structured_info(content: str) -> dict:
+def extract_structured_info(info_content: str, voice_content: str = "") -> dict:
     """
     从OCR识别内容中提取结构化产品信息（使用大模型调用）
 
     Args:
-        content: info.md 文件内容（纯文本格式，每行一个文本）
+        info_content: info.md 文件内容（图片OCR文字）
+        voice_content: voice.md 文件内容（语音识别文字）
 
     Returns:
         结构化数据字典
     """
     # 提取所有文本（纯文本格式，每行一个）
     all_texts = []
-    for line in content.split("\n"):
+    for line in info_content.split("\n"):
         line = line.strip()
-        if line:  # 非空行
+        if line:
             all_texts.append(line)
+
+    # 添加语音识别内容（如果有）
+    if voice_content:
+        for line in voice_content.split("\n"):
+            line = line.strip()
+            if line:
+                # 过滤时间戳标记 [001] 等
+                if line.startswith("[") and "]" in line:
+                    continue
+                all_texts.append(f"[语音]{line}")
 
     # 尝试使用大模型提取
     try:
@@ -184,11 +371,11 @@ def call_llm_for_structured_info(texts: list) -> dict:
     # 优先使用通义千问（阿里云）
     if api_keys["DASHSCOPE_API_KEY"]:
         return call_dashscope(prompt)
-    
+
     # 其次使用百度文心一言
     if api_keys["BAIDU_API_KEY"]:
         return call_baidu_ernie(prompt)
-    
+
     # 最后使用OpenAI
     if api_keys["OPENAI_API_KEY"]:
         return call_openai(prompt)
@@ -197,7 +384,7 @@ def call_llm_for_structured_info(texts: list) -> dict:
     return None
 
 
-def call_llm_for_summary_info(texts: list) -> dict:
+def call_llm_for_summary_info(info_content: str, voice_content: str = "") -> dict:
     """
     调用大模型提取摘要信息
 
@@ -211,8 +398,25 @@ def call_llm_for_summary_info(texts: list) -> dict:
     import requests
     import json
 
+    # 提取所有文本（纯文本格式，每行一个）
+    all_texts = []
+    for line in info_content.split("\n"):
+        line = line.strip()
+        if line:
+            all_texts.append(line)
+
+    # 添加语音识别内容（如果有）
+    if voice_content:
+        for line in voice_content.split("\n"):
+            line = line.strip()
+            if line:
+                # 过滤时间戳标记 [001] 等
+                if line.startswith("[") and "]" in line:
+                    continue
+                all_texts.append(f"[语音]{line}")
+
     # 构建prompt
-    prompt = build_summary_prompt(texts)
+    prompt = build_summary_prompt(all_texts)
 
     # 尝试多种大模型接口
     api_keys = {
@@ -280,7 +484,7 @@ def build_extraction_prompt(texts: list) -> str:
 你是一个产品信息提取专家。请从以下OCR识别的文本中提取产品的结构化信息。
 
 【识别到的文本内容】
-{chr(10).join(texts)}
+{chr(10).join(texts[:200])}
 
 【输出格式要求】
 请严格按照JSON格式输出，只输出JSON数据，不要输出其他任何内容。如果某个字段无法识别到，请留空字符串或适当的默认值。
@@ -518,7 +722,7 @@ def call_baidu_ernie(prompt: str) -> dict:
 
     api_key = os.environ.get("BAIDU_API_KEY")
     secret_key = os.environ.get("BAIDU_SECRET_KEY")
-    
+
     # 获取access_token
     token_url = "https://aip.baidubce.com/oauth/2.0/token"
     token_params = {
@@ -529,15 +733,15 @@ def call_baidu_ernie(prompt: str) -> dict:
     token_response = requests.post(token_url, params=token_params)
     if token_response.status_code != 200:
         return None
-    
+
     access_token = token_response.json().get("access_token")
     if not access_token:
         return None
-    
+
     url = "https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat/completions"
     headers = {"Content-Type": "application/json"}
     params = {"access_token": access_token}
-    
+
     data = {
         "messages": [
             {"role": "system", "content": "你是一个产品信息提取专家"},
@@ -545,7 +749,7 @@ def call_baidu_ernie(prompt: str) -> dict:
         ],
         "temperature": 0.1
     }
-    
+
     response = requests.post(url, headers=headers, params=params, data=json.dumps(data))
     if response.status_code == 200:
         result = response.json()
@@ -565,9 +769,9 @@ def call_openai(prompt: str) -> dict:
 
     api_key = os.environ.get("OPENAI_API_KEY")
     base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    
+
     client = openai.OpenAI(api_key=api_key, base_url=base_url)
-    
+
     response = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
@@ -576,7 +780,7 @@ def call_openai(prompt: str) -> dict:
         ],
         temperature=0.1
     )
-    
+
     content = response.choices[0].message.content
     try:
         return json.loads(content)
@@ -632,14 +836,14 @@ def extract_structured_info_rules(texts: list) -> dict:
     # 提取品牌和产品名称
     brands = ["小米", "红米", "Redmi", "MI", "OPPO", "vivo", "华为", "荣耀", "苹果", "iPhone", "三星", "Samsung"]
     product_keywords = ["Max", "Ultra", "Pro", "Plus", "Note", "系列", "手机"]
-    
+
     for text in texts:
         # 识别品牌
         for brand in brands:
             if brand in text:
                 if not result["品牌"]:
                     result["品牌"] = brand
-        
+
         # 识别产品名称（包含产品关键词）
         if any(keyword in text for keyword in product_keywords):
             if not result["产品名称"]:
@@ -651,7 +855,7 @@ def extract_structured_info_rules(texts: list) -> dict:
         r'(\d{4})年(\d{1,2})月(\d{1,2})日',
         r'(\d{4})[-/](\d{2})[-/](\d{2})'
     ]
-    
+
     for pattern in date_patterns:
         matches = re.findall(pattern, full_text)
         for match in matches:
@@ -795,8 +999,11 @@ def run_full_pipeline(video_path: Path, force: bool = False) -> dict:
         # 步骤2：OCR处理
         havetext_list, ocr_results = step2_ocr_processing(frames)
 
-        # 步骤3：结构化输出
-        structured_data = step3_extract_structured_info()
+        # 步骤3：语音识别
+        step3_voice_transcription(video_path)
+
+        # 步骤4：结构化输出
+        structured_data = step4_extract_structured_info()
 
         print("\n" + "#" * 60)
         print("# 处理完成!")
@@ -826,7 +1033,8 @@ def main():
   python main.py --clean-pics                  # 清空pics目录
   python main.py --step1 video.mp4             # 仅提取关键帧
   python main.py --step2                       # 仅运行OCR识别
-  python main.py --step3                       # 仅生成结构化结果
+  python main.py --step3 video.mp4             # 仅运行语音识别
+  python main.py --step4                       # 仅生成结构化结果
         """
     )
 
@@ -835,7 +1043,8 @@ def main():
     parser.add_argument("--clean-pics", action="store_true", help="清空pics目录所有图片")
     parser.add_argument("--step1", action="store_true", help="仅执行步骤1：提取关键帧")
     parser.add_argument("--step2", action="store_true", help="仅执行步骤2：OCR识别")
-    parser.add_argument("--step3", action="store_true", help="仅执行步骤3：结构化输出")
+    parser.add_argument("--step3", action="store_true", help="仅执行步骤3：语音识别")
+    parser.add_argument("--step4", action="store_true", help="仅执行步骤4：结构化输出")
 
     args = parser.parse_args()
 
@@ -865,9 +1074,17 @@ def main():
         step2_ocr_processing()
         return
 
-    # 步骤3单独执行
+    # 步骤3单独执行（语音识别）
     if args.step3:
-        step3_extract_structured_info()
+        if not args.video:
+            print("错误: --step3 需要指定视频文件")
+            sys.exit(1)
+        step3_voice_transcription(Path(args.video))
+        return
+
+    # 步骤4单独执行（大模型提取）
+    if args.step4:
+        step4_extract_structured_info()
         return
 
     # 完整流程

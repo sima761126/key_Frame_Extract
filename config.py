@@ -10,6 +10,7 @@ PICS_DIR = BASE_DIR / "pics"
 OUTPUT_FILES = {
     "havetext": BASE_DIR / "havetext.md",   # 包含文字的图片列表
     "info": BASE_DIR / "info.md",            # OCR识别结果
+    "voice": BASE_DIR / "voice.md",          # 语音识别结果
     "result": BASE_DIR / "result.json",       # 结构化JSON结果
     "summary": BASE_DIR / "summary.md"  # md文档
 }
@@ -42,8 +43,6 @@ SKIP_TEXT_PATTERNS = [
     "水印", "版权", "©", "logo", "默认", "提示",
     "请输入", "登录", "注册", "点击", "更多",
     "弹幕", "B站", "bilibili", "视频加载", "网络异常",
-    "数码星空", "10:0081", "frame_", "人车家全生态",
-    "xlaomI", "a0mI", "PPTO", "oddo", "OPP"
 ]
 
 # 图像预处理配置

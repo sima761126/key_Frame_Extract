@@ -206,17 +206,23 @@ class OCRProcessor:
         curr_combined = " ".join(curr_texts)
 
         similarity = self.calculate_similarity(prev_combined, curr_combined)
+        # print('similarity_check-prev:', len(prev_combined),prev_combined)
+        # print('similarity_check-curr:', len(curr_combined),curr_combined)
+        # print('similarity_check-similarity:',similarity,self.similarity_threshold)
 
         # 相似度超过阈值
         if similarity > self.similarity_threshold:
             # 保留信息量更多的那个
+            # print('similarity_check: similarity > self.similarity_threshold')
             if len(prev_combined) < len(curr_combined):
+                # print('similarity_check: len(prev_combined) < len(curr_combined)')
                 is_replace = True
                 result_texts = curr_texts
         else:
             # 相似度不高，直接增加
+            # print('similarity_check: 相似度不高，直接增加')
             result_texts = curr_texts
-
+        # print('similarity_check: ',result_texts,is_replace)
         return result_texts,is_replace
 
 
