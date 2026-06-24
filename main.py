@@ -284,6 +284,7 @@ def step4_extract_structured_info() -> dict:
 
     # 提取结构化信息（基于规则的关键信息提取）
     structured_data = extract_structured_info(info_content, voice_content)
+    # structured_data = extract_structured_info(info_content)
 
     # 保存结果
     result_path = config.OUTPUT_FILES["result"]
@@ -333,6 +334,7 @@ def extract_structured_info(info_content: str, voice_content: str = "") -> dict:
 
     # 尝试使用大模型提取
     try:
+
         result = call_llm_for_structured_info(all_texts)
         if result:
             print("大模型提取成功")
@@ -484,7 +486,7 @@ def build_extraction_prompt(texts: list) -> str:
 你是一个产品信息提取专家。请从以下OCR识别的文本中提取产品的结构化信息。
 
 【识别到的文本内容】
-{chr(10).join(texts[:200])}
+{chr(10).join(texts)}
 
 【输出格式要求】
 请严格按照JSON格式输出，只输出JSON数据，不要输出其他任何内容。如果某个字段无法识别到，请留空字符串或适当的默认值。
@@ -696,7 +698,70 @@ def call_dashscope_text(prompt: str) -> dict:
             elif "```markdown" in text:
                 text = text.split("```markdown")[1].split("```")[0]
 
-            # 解析 JSON
+            parsed_content = text.strip()
+            print("解析成功。")
+            return parsed_content
+        else:
+            print(f"API调用失败: {response.status_code} - {response.message}")
+            return None
+
+    # except dashscope.ApiError as e:
+    #     print(f"DashScope API 错误: {e}")
+    #     return None
+    except json.JSONDecodeError as e:
+        print(f"JSON解析失败: {e}. 原始内容: {output_text[:200]}")
+        return None
+    except Exception as e:
+        print(f"发生未知错误: {e}")
+        return None
+
+
+def call_dashscope_text(prompt: str) -> dict:
+    """
+    使用 dashscope SDK 调用阿里云通义千问 API。
+    支持从环境变量读取 API Key，并返回解析后的 MD 对象。
+    """
+    print("使用千问大模型 (SDK方式)")
+    # print('call_dashscope_text:',prompt)
+    # 构建符合 SDK 要求的 messages 格式
+    messages = [
+        {'role': 'system',
+         'content': '''作为手机终端数据处理专家，你的任务是严格按照规范处理数据，确保关键信息不丢失。
+                        没有明确规范或具体内容时，不要假设任何信息；必要时保留字段为空。
+                        专业术语无需翻译'''
+         },
+        {'role': 'user',
+         'content':  """
+                        所有键必须为中文，值之间不要有额外的空格。值的类型保持字符串，不再分割。
+                        严格按照 MD 格式输出："""+ prompt
+         }
+    ]
+    # print('call_dashscope_text:', messages)
+    try:
+        # 使用 dashscope.Generation.call 进行调用
+        response = dashscope.Generation.call(
+            api_key=os.getenv('DASHSCOPE_API_KEY'),
+            model="qwen-plus",  # 可按需更换模型，如 qwen-turbo, qwen-max
+            messages=messages,
+            result_format='message',  # 使用 message 格式便于解析
+            temperature=0.1,
+            max_tokens=8192
+        )
+
+        # 检查响应状态
+        if response.status_code == 200:
+            # 从响应中提取文本内容
+            # print(response)
+            output_text = response.output.choices[0].message.content
+            # print(f"原始响应内容: {output_text}...")  # 打印前200字符用于调试
+
+            # 尝试提取并解析 JSON（处理可能包含在 markdown 代码块中的情况）
+            text = output_text
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0]
+            elif "```markdown" in text:
+                text = text.split("```markdown")[1].split("```")[0]
+
             parsed_content = text.strip()
             print("解析成功。")
             return parsed_content
