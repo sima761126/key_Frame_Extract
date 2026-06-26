@@ -153,3 +153,91 @@ ffmpeg -i input视频文件 -vf "select='eq(pict_type\,I)'" -vsync vfr output图
 - 发布会的亮点与不足
 - 产品竞争力简要分析
 - 目标用户画像
+
+### 如果需要提取第 34 秒的关键帧
+#### 您最初的目标是提取 t=34s 附近的关键帧。可以使用以下命令：
+
+##### bash
+yt-dlp -f bestvideo -o - https://www.youtube.com/watch?v=ZAyGqCC649o | ffmpeg -i pipe:0 -ss 34 -frames:v 1 -q:v 2 frame_34s.jpg
+参数说明：
+
+- f bestvideo：选择最佳画质的视频流。
+
+- o ：将视频数据输出到标准输出（stdout）。
+
+- | ffmpeg -i pipe:0：FFmpeg 从标准输入（pipe:0）读取数据
+
+- ss 34：跳转到第 34 秒
+
+- frames:v 1：只输出 1 帧
+
+- q:v 2：高质量 JPEG
+
+### 如果您想提取多个关键帧
+#### 从第 34 秒开始提取 10 个关键帧
+##### bash
+yt-dlp -f bestvideo -o - https://www.youtube.com/watch?v=ZAyGqCC649o | ffmpeg -i pipe:0 -ss 34 -vf "select='eq(pict_type,I)'" -fps_mode vfr -frames:v 10 -q:v 2 frame_%03d.jpg
+#### 每隔 5 秒提取一个关键帧（从第 0 秒开始）
+##### bash
+yt-dlp -f bestvideo -o - https://www.youtube.com/watch?v=ZAyGqCC649o | ffmpeg -i pipe:0 -vf "select='eq(pict_type,I)*not(mod(t,5))'" -fps_mode vfr -q:v 2 frame_%03d.jpg
+
+## 直播
+### 第一步：查看直播流可用格式
+- 单独运行以下命令，查看该直播流支持哪些格式：
+
+  bash
+  - yt-dlp --cookies cookies.txt --list-formats https://live.bilibili.com/1990578339
+  - 执行后会输出类似这样的格式列表：
+
+text
+[info] Available formats for 1990578339:
+ID  EXT   PROTO  RESOLUTION  FPS  |  CODECS
+0   flv   https  1920x1080   30   |  h264
+1   flv   https  1280x720    30   |  h264
+2   flv   https  852x480     30   |  h264
+...
+### 第二步：使用正确的格式代码
+根据列表中的 ID（如 0、1、2），替换 -f 参数。例如，选择最高清格式（假设 ID 为 0）：
+
+bash
+  - yt-dlp --cookies cookies.txt -f 0 -o - https://live.bilibili.com/1990578339 | ffmpeg -i pipe:0 -frames:v 1 -q:v 2 frame.jpg
+  -如果不确定选哪个，通常可以选择分辨率最高的那一个。  
+
+连续帧
+  - yt-dlp --cookies live.bilibili.com_cookies.txt -f ultra_high_res-0  -o - https://live.bilibili.com/1990578339 | ffmpeg -i pipe:0 -vf "select='eq(pict_type,I)'" -fps_mode vfr -q:v 2 keyframe_%03d.jpg
+bash
+yt-dlp --cookies live.bilibili.com_cookies.txt -f ultra_high_res-0 -o - https://live.bilibili.com/1990578339 | ffmpeg -i pipe:0 -vf "fps=0.2" -fps_mode vfr -q:v 2 frame_%03d.jpg
+参数说明：
+
+-vf "fps=0.2"：设置帧率为 0.2 帧/秒，即每 5 秒取 1 帧（1/5=0.2）
+
+frame_%03d.jpg：输出为 frame_001.jpg、frame_002.jpg……
+
+📌 其他时间间隔选项
+提取间隔	fps 参数值	说明
+每 5 秒 1 帧	fps=0.2	1 ÷ 5 = 0.2
+每 10 秒 1 帧	fps=0.1	1 ÷ 10 = 0.1
+每 30 秒 1 帧	fps=0.0333	1 ÷ 30 ≈ 0.0333
+每 1 分钟 1 帧	fps=0.0167	1 ÷ 60 ≈ 0.0167
+ ## 下载视频MP4
+yt-dlp --cookies live.bilibili.com_cookies.txt -f best -o xfold6.mp4 https://live.bilibili.com/1990578339
+
+## 同时处理音频流，并使用 ffmpeg 的 segment 复用器按分钟切片。
+
+bash
+ - yt-dlp --cookies live.bilibili.com_cookies.txt -f ultra_high_res-0 -o - https://live.bilibili.com/1990578339 | ffmpeg -i pipe:0 -vf "fps=0.2" -fps_mode vfr -q:v 2 frame_%04d.png -map 0:a -f segment -segment_time 60 -c:a aac -b:a 128k audio_%03d.aac
+- 命令解析：
+
+-map 0:a：从输入中选择音频流。
+
+-f segment -segment_time 60：使用分段复用器，每 60 秒切一刀。
+
+-c:a aac -b:a 128k：音频编码为 AAC，比特率 128k。
+
+audio_%03d.aac：输出音频文件命名模板，会生成 audio_001.aac、audio_002.aac...
+
+#### 其他音频切片方案
+方案	命令（FFmpeg 部分）	特点
+- 按固定时长切片（如 5 分钟）	-map 0:a -f segment -segment_time 300 -c copy audio_%03d.aac	-c copy 直接复制，速度快但可能切不准
+- 按关键帧切片（精确切割）	-map 0:a -f segment -segment_time 60 -force_key_frames "expr:gte(t,n_forced*60)" -c:a aac audio_%03d.aac	在指定时间点强制插入关键帧，切割更精确
+- 只提取完整音频（不切片）	-map 0:a -c:a aac -b:a 128k output.aac	生成一个完整的音频文件
