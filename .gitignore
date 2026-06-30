@@ -43,5 +43,11 @@ summary.md
 # 大模型与语音模型缓存
 models/
 
+# 影像文件
+*.mp4
+*.aac
+*.mp3
+
+
 # 日志文件
 *.log
