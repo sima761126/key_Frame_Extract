@@ -241,3 +241,18 @@ audio_%03d.aac：输出音频文件命名模板，会生成 audio_001.aac、audi
 - 按固定时长切片（如 5 分钟）	-map 0:a -f segment -segment_time 300 -c copy audio_%03d.aac	-c copy 直接复制，速度快但可能切不准
 - 按关键帧切片（精确切割）	-map 0:a -f segment -segment_time 60 -force_key_frames "expr:gte(t,n_forced*60)" -c:a aac audio_%03d.aac	在指定时间点强制插入关键帧，切割更精确
 - 只提取完整音频（不切片）	-map 0:a -c:a aac -b:a 128k output.aac	生成一个完整的音频文件
+### 视频+音频
+yt-dlp --cookies movie.bilibili.com_cookies.txt -f 100027+30280 --merge-output-format mp4 -o 三个臭皮匠.mp4 [视频链接]
+
+yt-dlp --cookies movie.bilibili.com_cookies.txt -f "bestvideo[ext=mp4][vcodec^=avc1]+bestaudio[ext=m4a]/best[ext=mp4]" -o 鼹鼠的故事  https://www.bilibili.com/video/BV1evkYBdEXt
+
+### 列表直接下载整个列表
+最简单直接的方法，就是把播放列表或频道的链接直接传给 yt-dlp：
+
+bash
+yt-dlp --cookies movie.bilibili.com_cookies.txt -f "bestvideo+bestaudio/best" -o "%(playlist_title)s/%(title)s.%(ext)s" "播放列表或频道的URL"
+参数说明：
+
+"播放列表或频道的URL"：直接替换成你要下载的B站合集、播放列表或UP主主页的链接。
+
+-o "%(playlist_title)s/%(title)s.%(ext)s"：这是关键，它会自动为每个视频按“列表名称/视频标题.扩展名”的格式保存，避免所有文件堆在一起。如果不加这个，所有视频都会下载到当前文件夹，容易混乱。
