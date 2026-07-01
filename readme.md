@@ -1,5 +1,16 @@
 # key_Frame_Extract
 
+.. image:: https://img.shields.io/pypi/v/python_pptx_interface.svg
+    :target: https://pypi.org/project/python_pptx_interface/
+
+.. image:: http://img.shields.io/:license-MIT-blue.svg?style=flat-square
+    :target: http://badges.MIT-license.org
+
+|
+
+.. figure:: https://github.com/natter1/python_pptx_interface/raw/master/docs/images/general_example_o1_title_slide.png
+    :width: 500pt
+
 ## 项目简介
 
 `key_Frame_Extract` 是一个面向视频内容处理的 Python 项目，主要包含以下能力：
