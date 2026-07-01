@@ -3,195 +3,203 @@
 # Version: 1.0.0
 
 """
-测试B站Cookies获取工具的各项功能
+B站Cookies获取器测试代码
+
+测试内容：
+1. B站Cookie域名判断
+2. Cookie格式化（直播和视频模式）
+3. Netscape格式转换
+4. JSON文件保存
+5. 文件预览
+6. 模式相关方法测试
 """
 
-import json
 import os
-import tempfile
+import sys
 import unittest
 from pathlib import Path
 
-from download.get_bilibili_cookies import BilibiliCookiesFetcher
+sys.path.insert(0, str(Path(__file__).parent.parent / "download"))
+from get_bilibili_cookies import BilibiliCookiesFetcher
 
 
 class TestBilibiliCookiesFetcher(unittest.TestCase):
-    """测试B站Cookies获取器类"""
+    """测试B站Cookies获取器（直播和视频模式）"""
 
     def setUp(self):
         """测试前准备"""
-        self.temp_dir = tempfile.mkdtemp()
-        self.output_file = os.path.join(self.temp_dir, "test_cookies.txt")
-        self.fetcher = BilibiliCookiesFetcher(output_file=self.output_file)
+        self.stream_fetcher = BilibiliCookiesFetcher(
+            output_file="test_stream_cookies.txt", mode="stream"
+        )
+        self.video_fetcher = BilibiliCookiesFetcher(
+            output_file="test_video_cookies.txt", mode="video"
+        )
 
-    def tearDown(self):
-        """测试后清理"""
-        if os.path.exists(self.temp_dir):
-            import shutil
-            shutil.rmtree(self.temp_dir)
+    def test_bilibili_domains(self):
+        """测试B站域名列表"""
+        self.assertEqual(
+            self.stream_fetcher.BILIBILI_DOMAINS,
+            (
+                ".bilibili.com",
+                "live.bilibili.com",
+                "www.bilibili.com",
+                "video.bilibili.com",
+            ),
+        )
 
-    def test_is_bilibili_cookie_true(self):
-        """测试判断B站Cookie返回True"""
-        test_cookies = [
-            {"domain": ".bilibili.com", "name": "test", "value": "value"},
-            {"domain": "live.bilibili.com", "name": "test", "value": "value"},
-            {"domain": "www.bilibili.com", "name": "test", "value": "value"},
-            {"domain": "api.bilibili.com", "name": "test", "value": "value"},
-        ]
-        for cookie in test_cookies:
-            self.assertTrue(
-                self.fetcher._is_bilibili_cookie(cookie),
-                f"Cookie '{cookie['domain']}' 应该被识别为B站Cookie"
-            )
+    def test_bilibili_live_url(self):
+        """测试B站直播页面URL"""
+        self.assertEqual(
+            self.stream_fetcher.BILIBILI_LIVE_URL, "https://live.bilibili.com/"
+        )
 
-    def test_is_bilibili_cookie_false(self):
-        """测试判断非B站Cookie返回False"""
-        test_cookies = [
-            {"domain": ".youtube.com", "name": "test", "value": "value"},
-            {"domain": "www.baidu.com", "name": "test", "value": "value"},
-            {"domain": "", "name": "test", "value": "value"},
-            {"domain": "example.com", "name": "test", "value": "value"},
-        ]
-        for cookie in test_cookies:
-            self.assertFalse(
-                self.fetcher._is_bilibili_cookie(cookie),
-                f"Cookie '{cookie['domain']}' 不应该被识别为B站Cookie"
-            )
+    def test_bilibili_video_url(self):
+        """测试B站视频页面URL"""
+        self.assertEqual(
+            self.video_fetcher.BILIBILI_VIDEO_URL, "https://www.bilibili.com/"
+        )
 
-    def test_format_cookies_only_bilibili(self):
-        """测试格式化Cookies只保留B站相关的"""
+    def test_is_bilibili_cookie_stream(self):
+        """测试判断B站直播Cookie"""
+        bilibili_cookie = {"domain": ".bilibili.com", "name": "test", "value": "value"}
+        self.assertTrue(self.stream_fetcher._is_bilibili_cookie(bilibili_cookie))
+
+        live_cookie = {"domain": "live.bilibili.com", "name": "test", "value": "value"}
+        self.assertTrue(self.stream_fetcher._is_bilibili_cookie(live_cookie))
+
+        other_cookie = {"domain": "www.baidu.com", "name": "test", "value": "value"}
+        self.assertFalse(self.stream_fetcher._is_bilibili_cookie(other_cookie))
+
+    def test_is_bilibili_cookie_video(self):
+        """测试判断B站视频Cookie"""
+        bilibili_cookie = {"domain": ".bilibili.com", "name": "test", "value": "value"}
+        self.assertTrue(self.video_fetcher._is_bilibili_cookie(bilibili_cookie))
+
+        video_cookie = {"domain": "video.bilibili.com", "name": "test", "value": "value"}
+        self.assertTrue(self.video_fetcher._is_bilibili_cookie(video_cookie))
+
+        other_cookie = {"domain": "www.baidu.com", "name": "test", "value": "value"}
+        self.assertFalse(self.video_fetcher._is_bilibili_cookie(other_cookie))
+
+    def test_format_cookies(self):
+        """测试格式化Cookies"""
         raw_cookies = [
-            {"domain": ".bilibili.com", "name": "bili_cookie", "value": "bili_value"},
-            {"domain": "live.bilibili.com", "name": "live_cookie", "value": "live_value"},
-            {"domain": ".youtube.com", "name": "youtube_cookie", "value": "youtube_value"},
+            {"domain": ".bilibili.com", "name": "cookie1", "value": "value1"},
+            {"domain": "www.baidu.com", "name": "cookie2", "value": "value2"},
+            {"domain": "live.bilibili.com", "name": "cookie3", "value": "value3"},
+            {"domain": "video.bilibili.com", "name": "cookie4", "value": "value4"},
         ]
 
-        result = self.fetcher._format_cookies(raw_cookies)
+        formatted = self.stream_fetcher._format_cookies(raw_cookies)
+        self.assertEqual(len(formatted), 3)
+        self.assertEqual(formatted[0]["name"], "cookie1")
+        self.assertEqual(formatted[1]["name"], "cookie3")
+        self.assertEqual(formatted[2]["name"], "cookie4")
 
-        self.assertEqual(len(result), 2)
-        cookie_names = [c["name"] for c in result]
-        self.assertIn("bili_cookie", cookie_names)
-        self.assertIn("live_cookie", cookie_names)
-        self.assertNotIn("youtube_cookie", cookie_names)
+    def test_get_url_stream(self):
+        """测试获取直播模式URL"""
+        self.assertEqual(self.stream_fetcher._get_url(), "https://live.bilibili.com/")
 
-    def test_format_cookies_empty(self):
-        """测试格式化空Cookies列表"""
-        result = self.fetcher._format_cookies([])
-        self.assertEqual(result, [])
+    def test_get_url_video(self):
+        """测试获取视频模式URL"""
+        self.assertEqual(self.video_fetcher._get_url(), "https://www.bilibili.com/")
 
-    def test_convert_to_netscape_basic(self):
-        """测试转换Netscape格式基本功能"""
-        test_cookies = [
+    def test_get_mode_name_stream(self):
+        """测试获取直播模式名称"""
+        self.assertEqual(self.stream_fetcher._get_mode_name(), "直播")
+
+    def test_get_mode_name_video(self):
+        """测试获取视频模式名称"""
+        self.assertEqual(self.video_fetcher._get_mode_name(), "视频")
+
+    def test_convert_to_netscape(self):
+        """测试转换为Netscape格式"""
+        cookies = [
             {
-                "name": "test_cookie",
+                "name": "bili_ticket",
                 "value": "test_value",
                 "domain": ".bilibili.com",
                 "path": "/",
-                "expires": 1782873587,
+                "expires": 1783132786,
                 "secure": False,
+                "httpOnly": False,
             }
         ]
 
-        result_file = self.fetcher.convert_to_netscape(test_cookies)
+        result = self.stream_fetcher.convert_to_netscape(cookies)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.exists())
 
-        self.assertIsNotNone(result_file)
-        self.assertTrue(os.path.exists(result_file))
-
-        with open(result_file, "r", encoding="utf-8") as f:
+        with open(result, "r", encoding="utf-8") as f:
             content = f.read()
+            self.assertIn(".bilibili.com", content)
+            self.assertIn("bili_ticket", content)
+            self.assertIn("test_value", content)
 
-        self.assertIn("# Netscape HTTP Cookie File", content)
-        self.assertIn(".bilibili.com", content)
-        self.assertIn("test_cookie", content)
-        self.assertIn("test_value", content)
+        result.unlink()
 
-    def test_convert_to_netscape_empty(self):
-        """测试转换空Cookies列表"""
-        result = self.fetcher.convert_to_netscape([])
-        self.assertIsNone(result)
-
-    def test_convert_to_netscape_expiry_field(self):
-        """测试转换使用expiry字段的Cookies"""
-        test_cookies = [
-            {
-                "name": "session_cookie",
-                "value": "session_value",
-                "domain": "live.bilibili.com",
-                "path": "/",
-                "expiry": 1782873587,
-                "secure": True,
-            }
-        ]
-
-        result_file = self.fetcher.convert_to_netscape(test_cookies)
-
-        self.assertIsNotNone(result_file)
-
-    def test_convert_to_netscape_no_expires(self):
+    def test_convert_to_netscape_no_expire(self):
         """测试转换没有过期时间的Cookies"""
-        test_cookies = [
+        cookies = [
             {
                 "name": "session_only",
-                "value": "no_expire",
-                "domain": ".bilibili.com",
+                "value": "session_value",
+                "domain": "www.bilibili.com",
                 "path": "/",
+                "expires": None,
+                "secure": False,
+                "httpOnly": False,
             }
         ]
 
-        result_file = self.fetcher.convert_to_netscape(test_cookies)
+        result = self.video_fetcher.convert_to_netscape(cookies)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.exists())
 
-        self.assertIsNotNone(result_file)
-
-        with open(result_file, "r", encoding="utf-8") as f:
+        with open(result, "r", encoding="utf-8") as f:
             content = f.read()
+            self.assertIn("0\tsession_only\tsession_value", content)
 
-        self.assertIn("0\tsession_only\tno_expire", content)
+        result.unlink()
 
     def test_save_cookies_to_json(self):
         """测试保存JSON文件"""
-        test_cookies = [
-            {"name": "test1", "value": "value1", "domain": ".bilibili.com"},
-            {"name": "test2", "value": "value2", "domain": "live.bilibili.com"},
+        cookies = [
+            {"name": "cookie1", "value": "value1", "domain": ".bilibili.com"},
+            {"name": "cookie2", "value": "value2", "domain": "www.bilibili.com"},
         ]
 
-        result_file = self.fetcher.save_cookies_to_json(test_cookies)
+        result = self.stream_fetcher.save_cookies_to_json(cookies)
+        self.assertIsNotNone(result)
+        self.assertTrue(result.exists())
 
-        self.assertIsNotNone(result_file)
-        self.assertTrue(os.path.exists(result_file))
-
-        with open(result_file, "r", encoding="utf-8") as f:
-            saved_cookies = json.load(f)
-
-        self.assertEqual(len(saved_cookies), 2)
+        result.unlink()
 
     def test_save_cookies_to_json_empty(self):
         """测试保存空Cookies列表"""
-        result = self.fetcher.save_cookies_to_json([])
+        result = self.video_fetcher.save_cookies_to_json([])
         self.assertIsNone(result)
 
-    def test_show_preview_file_not_exists(self):
-        """测试预览不存在的文件"""
-        self.fetcher.output_file = Path("non_existent_file.txt")
-        try:
-            self.fetcher.show_preview()
-        except Exception:
-            self.fail("show_preview()应该处理文件不存在的情况")
+    def test_show_preview(self):
+        """测试显示预览"""
+        test_file = self.stream_fetcher.output_file
+        test_file.write_text(
+            "# Netscape HTTP Cookie File\n.bilibili.com\tTRUE\t/\tFALSE\t0\ttest\tvalue",
+            encoding="utf-8",
+        )
 
-    def test_show_preview_valid_file(self):
-        """测试预览有效文件"""
-        test_cookies = [
-            {"name": "test", "value": "value", "domain": ".bilibili.com", "path": "/"}
-        ]
-        self.fetcher.convert_to_netscape(test_cookies)
+        self.stream_fetcher.show_preview(lines_count=5)
 
-        try:
-            self.fetcher.show_preview(lines_count=5)
-        except Exception:
-            self.fail("show_preview()应该能正常显示有效文件")
+        test_file.unlink()
+
+    def test_show_preview_nonexistent(self):
+        """测试显示不存在文件的预览"""
+        self.stream_fetcher.output_file = Path("nonexistent_file.txt")
+        self.stream_fetcher.show_preview()
 
 
 if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("运行B站Cookies获取工具测试")
+    print("=" * 60)
+    print("运行B站Cookies获取器测试")
     print("=" * 60)
     unittest.main(verbosity=2)

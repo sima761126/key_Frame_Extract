@@ -1,16 +1,20 @@
 # Name： B站Cookies获取工具
 # Author: simajinghua
-# Version: 1.0.0
+# Version: 2.0.0
 
 """
 功能：
 1. 使用Playwright自动化浏览器访问B站获取Cookies
-2. 将Cookies转换为Netscape HTTP Cookie File格式（yt-dlp/curl使用）
-3. 输出到cookies.txt文件
+2. 支持直播(stream)和视频(video)两种模式
+3. 将Cookies转换为Netscape HTTP Cookie File格式（yt-dlp/curl使用）
+4. 输出到指定的cookies文件
 
 使用示例：
-    # 获取B站Cookies
+    # 获取B站直播Cookies（默认）
     python get_bilibili_cookies.py
+
+    # 获取B站视频Cookies
+    python get_bilibili_cookies.py --mode video
 
     # 获取Cookies并指定输出文件
     python get_bilibili_cookies.py --output my_cookies.txt
@@ -27,25 +31,29 @@ from typing import List, Optional, Dict
 
 
 class BilibiliCookiesFetcher:
-    """B站Cookies获取器类，使用Playwright获取B站Cookies"""
+    """B站Cookies获取器类，使用Playwright获取B站Cookies，支持直播和视频模式"""
 
     # B站域名列表
     BILIBILI_DOMAINS = (
         ".bilibili.com",
         "live.bilibili.com",
         "www.bilibili.com",
+        "video.bilibili.com",
     )
 
-    # B站直播页面URL
+    # B站页面URL
     BILIBILI_LIVE_URL = "https://live.bilibili.com/"
+    BILIBILI_VIDEO_URL = "https://www.bilibili.com/"
 
-    def __init__(self, output_file: str = "live.bilibili.com_cookies.txt") -> None:
+    def __init__(self, output_file: str, mode: str = "stream") -> None:
         """初始化B站Cookies获取器
 
         Args:
             output_file: 输出的Netscape格式Cookies文件路径
+            mode: 获取模式，"stream"（直播）或"video"（视频）
         """
         self.output_file = Path(output_file)
+        self.mode = mode
 
     def _is_bilibili_cookie(self, cookie: Dict) -> bool:
         """判断Cookie是否属于B站域名
@@ -82,6 +90,18 @@ class BilibiliCookiesFetcher:
                 })
         return formatted
 
+    def _get_url(self) -> str:
+        """获取当前模式对应的URL"""
+        if self.mode == "video":
+            return self.BILIBILI_VIDEO_URL
+        return self.BILIBILI_LIVE_URL
+
+    def _get_mode_name(self) -> str:
+        """获取模式名称（用于日志输出）"""
+        if self.mode == "video":
+            return "视频"
+        return "直播"
+
     def fetch_cookies(self) -> Optional[List[Dict]]:
         """使用Playwright获取B站Cookies
 
@@ -101,8 +121,10 @@ class BilibiliCookiesFetcher:
                     context = browser.new_context()
                     page = context.new_page()
 
-                    print(f"正在访问B站直播页面: {self.BILIBILI_LIVE_URL}")
-                    page.goto(self.BILIBILI_LIVE_URL, wait_until="networkidle")
+                    url = self._get_url()
+                    mode_name = self._get_mode_name()
+                    print(f"正在访问B站{mode_name}页面: {url}")
+                    page.goto(url, wait_until="networkidle")
 
                     raw_cookies = context.cookies()
                     print(f"原始Cookies数量: {len(raw_cookies)}")
@@ -145,7 +167,8 @@ class BilibiliCookiesFetcher:
             print("没有Cookies可保存")
             return None
 
-        json_path = self.output_file.parent / "bilibili_cookies.json"
+        mode_name = self._get_mode_name()
+        json_path = self.output_file.parent / f"bilibili_{mode_name}_cookies.json"
 
         try:
             with open(json_path, "w", encoding="utf-8") as f:
@@ -245,9 +268,16 @@ def main():
         description="B站Cookies获取工具 - 使用Playwright获取B站Cookies"
     )
     parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["stream", "video"],
+        default="stream",
+        help="获取模式：stream（直播）或 video（视频）",
+    )
+    parser.add_argument(
         "--output",
         type=str,
-        default="live.bilibili.com_cookies.txt",
+        default=None,
         help="输出的Cookies文件名（Netscape格式）",
     )
     parser.add_argument(
@@ -258,17 +288,26 @@ def main():
 
     args = parser.parse_args()
 
+    # 设置默认输出文件名
+    if args.output is None:
+        if args.mode == "video":
+            args.output = "www.bilibili.com_cookies.txt"
+        else:
+            args.output = "live.bilibili.com_cookies.txt"
+
+    mode_name = "视频" if args.mode == "video" else "直播"
+
     print("\n" + "#" * 60)
-    print("# B站Cookies获取工具")
+    print(f"# B站{mode_name}Cookies获取工具")
     print("#" * 60)
-    print("\n自动获取B站Cookies并转换为Netscape格式（yt-dlp/curl使用）")
+    print(f"\n自动获取B站{mode_name}Cookies并转换为Netscape格式（yt-dlp/curl使用）")
     print("请确保你已经在浏览器中登录过B站，否则获取的Cookies可能无效\n")
 
-    fetcher = BilibiliCookiesFetcher(output_file=args.output)
+    fetcher = BilibiliCookiesFetcher(output_file=args.output, mode=args.mode)
 
     cookies = fetcher.fetch_cookies()
     if not cookies:
-        print("\n未获取到B站Cookies，程序退出")
+        print(f"\n未获取到B站{mode_name}Cookies，程序退出")
         return
 
     result_file = fetcher.convert_to_netscape(cookies)
@@ -281,8 +320,8 @@ def main():
     print("\n" + "#" * 60)
     print("# 完成!")
     print("#" * 60)
-    print("\ncookies.txt文件可直接用于yt-dlp或curl")
-    print("使用示例: yt-dlp --cookies cookies.txt <bilibili_url>")
+    print(f"\n{args.output}文件可直接用于yt-dlp或curl")
+    print(f"使用示例: yt-dlp --cookies {args.output} <bilibili_url>")
 
 
 if __name__ == "__main__":
