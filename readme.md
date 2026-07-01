@@ -1,5 +1,10 @@
 # key_Frame_Extract
 
+
+[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/hugohe3/ppt-master/releases)
+[![PyPI Version](https://img.shields.io/pypi/v/python_pptx_interface.svg)](https://pypi.org/project/python_pptx_interface/)
+[![License: MIT](http://img.shields.io/:license-MIT-blue.svg?style=flat-square)](http://badges.MIT-license.org)
+
 ## 项目简介
 
 `key_Frame_Extract` 是一个面向视频内容处理的 Python 项目，主要包含以下能力：
