@@ -3,7 +3,7 @@
 [![PyPI Version](https://img.shields.io/pypi/v/python_pptx_interface.svg)](https://pypi.org/project/python_pptx_interface/)
 [![License: MIT](http://img.shields.io/:license-MIT-blue.svg?style=flat-square)](http://badges.MIT-license.org)
 
-![General Example](https://github.com/natter1/python_pptx_interface/raw/master/docs/images/general_example_o1_title_slide.png){ width=500 }
+![General Example](https://github.com/natter1/python_pptx_interface/raw/master/docs/images/general_example_o1_title_slide.png)
 
 
 ## 项目简介
