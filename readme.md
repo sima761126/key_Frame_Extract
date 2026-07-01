@@ -1,7 +1,7 @@
 # key_Frame_Extract
 
 
-[![Version](https://img.shields.io/badge/version-v1.00.00-blue.svg)](https://github.com/hugohe3/ppt-master/releases)
+[![Version](https://img.shields.io/badge/version-v1.0.0-blue.svg)](https://github.com/hugohe3/ppt-master/releases)
 [![PyPI Version](https://img.shields.io/pypi/v/python_pptx_interface.svg)](https://pypi.org/project/python_pptx_interface/)
 [![License: MIT](http://img.shields.io/:license-MIT-blue.svg?style=flat-square)](http://badges.MIT-license.org)
 
