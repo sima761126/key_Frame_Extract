@@ -12,7 +12,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from get_bilibili_cookies import BilibiliCookiesFetcher
+from download.get_bilibili_cookies import BilibiliCookiesFetcher
 
 
 class TestBilibiliCookiesFetcher(unittest.TestCase):

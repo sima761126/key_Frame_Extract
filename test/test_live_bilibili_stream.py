@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
-from live_bilibili_stream_downloader import BilibiliLiveStreamer
+from download.live_bilibili_stream_downloader import BilibiliLiveStreamer
 
 
 class TestBilibiliLiveStreamer(unittest.TestCase):
@@ -51,13 +51,14 @@ class TestBilibiliLiveStreamer(unittest.TestCase):
 
     def test_is_fmp4_format_true(self):
         """测试判断fmp4格式ID返回True"""
-        fmp4_formats = ["ultra_high_res-1", "ultra_high_res-2", "ultra_high_res-3", "ultra_high_res-6", "ultra_high_res-7"]
+        fmp4_formats = ["ultra_high_res-0", "ultra_high_res-1", "ultra_high_res-2", "ultra_high_res-3",
+                        "ultra_high_res-6", "ultra_high_res-7"]
         for fmt in fmp4_formats:
             self.assertTrue(self.streamer._is_fmp4_format(fmt), f"格式 '{fmt}' 应该被识别为fmp4格式")
 
     def test_is_fmp4_format_false(self):
         """测试判断非fmp4格式ID返回False"""
-        flv_formats = ["ultra_high_res-0", "ultra_high_res-4", "ultra_high_res-5"]
+        flv_formats = ["ultra_high_res-4", "ultra_high_res-5"]
         for fmt in flv_formats:
             self.assertFalse(self.streamer._is_fmp4_format(fmt), f"格式 '{fmt}' 不应该被识别为fmp4格式")
 
@@ -96,6 +97,7 @@ class TestBilibiliLiveStreamer(unittest.TestCase):
     def test_fmp4_format_ids(self):
         """测试fmp4格式ID列表"""
         fmp4_ids = self.streamer.FMP4_FORMAT_IDS
+        self.assertIn("ultra_high_res-0", fmp4_ids)
         self.assertIn("ultra_high_res-1", fmp4_ids)
         self.assertIn("ultra_high_res-2", fmp4_ids)
         self.assertIn("ultra_high_res-3", fmp4_ids)
@@ -105,7 +107,6 @@ class TestBilibiliLiveStreamer(unittest.TestCase):
     def test_flv_format_ids(self):
         """测试FLV格式ID列表"""
         flv_ids = self.streamer.FLV_FORMAT_IDS
-        self.assertIn("ultra_high_res-0", flv_ids)
         self.assertIn("ultra_high_res-4", flv_ids)
         self.assertIn("ultra_high_res-5", flv_ids)
 
