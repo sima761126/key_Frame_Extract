@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent))
-from download.live_bilibili_stream_downloader import BilibiliLiveStreamer
+from download.bilibili_stream_downloader import BilibiliLiveStreamer
 
 
 class TestBilibiliLiveStreamer(unittest.TestCase):

@@ -13,13 +13,13 @@
 
 使用示例：
     # 查看直播格式
-    python live_bilibili_stream_downloader.py --list-formats "https://live.bilibili.com/123456"
+    python bilibili_stream_downloader.py --list-formats "https://live.bilibili.com/123456"
 
     # 直播录制并切片（默认视频10秒间隔，音频60秒间隔）
-    python live_bilibili_stream_downloader.py --live "https://live.bilibili.com/123456"
+    python bilibili_stream_downloader.py --live "https://live.bilibili.com/123456"
 
     # 自定义参数
-    python live_bilibili_stream_downloader.py --live "https://live.bilibili.com/123456" \
+    python bilibili_stream_downloader.py --live "https://live.bilibili.com/123456" \
         --interval 10 --audio-interval 60 --duration 3600 --image-format png --audio-format mp3
 """
 
