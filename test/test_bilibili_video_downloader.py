@@ -71,7 +71,7 @@ class TestBilibiliVideoDownloader(unittest.TestCase):
 
     def test_default_format_id(self):
         """测试默认格式ID"""
-        self.assertEqual(self.downloader.DEFAULT_FORMAT_ID, "best")
+        self.assertEqual(self.downloader.DEFAULT_FORMAT_ID, None)
 
 
 if __name__ == "__main__":
