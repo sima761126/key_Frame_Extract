@@ -18,11 +18,11 @@
     # 查看视频格式
     python bilibili_video_downloader.py --list-formats "https://www.bilibili.com/video/BV1xx411c7mZ/"
 
-    # 边下载边切片（默认模式）
+    # 先下载后切片（默认模式）
     python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1xx411c7mZ/"
 
-    # 先下载后切片
-    python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1xx411c7mZ/" --mode download
+    # 边下载边切片
+    python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1xx411c7mZ/" --mode streaming
 
     # 自定义参数
     python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1xx411c7mZ/" \
@@ -38,6 +38,7 @@ import time
 import traceback
 from pathlib import Path
 from typing import Optional, Set
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class BilibiliVideoDownloader:
@@ -56,7 +57,7 @@ class BilibiliVideoDownloader:
     )
 
     # 默认格式ID
-    DEFAULT_FORMAT_ID = "best"
+    DEFAULT_FORMAT_ID = None
 
     def __init__(self, cookies_file: str = "www.bilibili.com_cookies.txt") -> None:
         """初始化B站视频下载器
@@ -200,14 +201,25 @@ class BilibiliVideoDownloader:
         print("[切片线程] 等待文件开始写入...")
 
         file_ready = False
+        actual_file = None
         while not self._recording_done and not file_ready:
-            actual_file = video_path if video_path.exists() else Path(str(video_path) + ".part")
-
-            if actual_file.exists():
-                file_size = actual_file.stat().st_size
-                if file_size > 500 * 1024:
-                    print(f"\n[切片线程] 文件就绪 ({file_size/(1024*1024):.1f}MB)，开始切片")
-                    file_ready = True
+            for f in video_path.parent.glob("*"):
+                if f.is_file() and f.suffix in [".mp4", ".flv", ".mkv", ".webm", ".mov"]:
+                    file_size = f.stat().st_size
+                    if file_size > 500 * 1024:
+                        actual_file = f
+                        print(f"\n[切片线程] 文件就绪 ({f.name}, {file_size/(1024*1024):.1f}MB)，开始切片")
+                        file_ready = True
+                        break
+            if not file_ready:
+                for f in video_path.parent.glob("*.part"):
+                    if f.is_file():
+                        file_size = f.stat().st_size
+                        if file_size > 500 * 1024:
+                            actual_file = f
+                            print(f"\n[切片线程] 文件就绪 ({f.name}, {file_size/(1024*1024):.1f}MB)，开始切片")
+                            file_ready = True
+                            break
             time.sleep(0.5)
 
         if not file_ready:
@@ -221,13 +233,18 @@ class BilibiliVideoDownloader:
         while not self._recording_done:
             elapsed = time.time() - slice_start_time
 
+            for f in video_path.parent.glob("*"):
+                if f.is_file() and f.suffix in [".mp4", ".flv", ".mkv", ".webm", ".mov"]:
+                    if f.stat().st_size > 500 * 1024:
+                        actual_file = f
+                        break
+
             expected_frame_idx = int(elapsed / interval)
 
             while frame_idx <= expected_frame_idx:
                 frame_time = frame_idx * interval
-                actual_file = video_path if video_path.exists() else Path(str(video_path) + ".part")
 
-                if actual_file.exists() and actual_file.stat().st_size > 500 * 1024:
+                if actual_file and actual_file.exists() and actual_file.stat().st_size > 500 * 1024:
                     try:
                         frame_output = str(frames_dir / f"frame_{frame_time:04d}_{frame_idx + 1:04d}.{image_format}")
                         if not Path(frame_output).exists():
@@ -256,9 +273,8 @@ class BilibiliVideoDownloader:
 
             while audio_idx <= expected_audio_idx:
                 audio_time = audio_idx * audio_interval
-                actual_file = video_path if video_path.exists() else Path(str(video_path) + ".part")
 
-                if actual_file.exists() and actual_file.stat().st_size > 500 * 1024:
+                if actual_file and actual_file.exists() and actual_file.stat().st_size > 500 * 1024:
                     try:
                         audio_output = str(audio_dir / f"audio_{audio_time:04d}_{audio_idx + 1:04d}.{audio_format}")
                         if not Path(audio_output).exists():
@@ -321,76 +337,141 @@ class BilibiliVideoDownloader:
         video_path = actual_file
 
         try:
-            cmd_duration = ["ffmpeg", "-i", str(video_path), "-f", "null", "-", "-hide_banner"]
-            result = subprocess.run(cmd_duration, capture_output=True, text=True, errors="ignore")
+            cmd_duration = ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(video_path)]
+            result = subprocess.run(cmd_duration, capture_output=True, text=True, errors="ignore", timeout=30)
 
             duration = 0.0
-            for line in result.stderr.split("\n"):
-                if "Duration:" in line:
-                    parts = line.split(",")[0].split("Duration:")[1].strip().split(":")
-                    duration = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
-                    break
+            if result.returncode == 0 and result.stdout.strip():
+                try:
+                    duration = float(result.stdout.strip())
+                except ValueError:
+                    pass
 
             if duration == 0 or (actual_duration and actual_duration > duration):
                 duration = actual_duration if actual_duration else 60.0
 
             print(f"视频时长: {duration:.2f}秒")
 
-            existing_frames: Set[int] = set()
-            for f in frames_dir.glob(f"frame_*.{image_format}"):
-                start_time = int(f.name.split("_")[1])
-                existing_frames.add(start_time)
-
-            existing_audios: Set[int] = set()
-            for f in audio_dir.glob(f"audio_*.{audio_format}"):
-                start_time = int(f.name.split("_")[1])
-                existing_audios.add(start_time)
-
-            print(f"已存在图片: {len(existing_frames)} 个")
-            print(f"已存在音频: {len(existing_audios)} 个")
-
             frame_count = int(duration / interval) + 1
+            audio_count = int(duration / audio_interval) + 1
+            print(f"开始切片: 共需提取 {frame_count} 张图片, {audio_count} 段音频")
+
+            temp_frame_pattern = str(frames_dir / f"temp_frame_%04d.{image_format}")
+            temp_audio_pattern = str(audio_dir / f"temp_audio_%04d.{audio_format}")
+
+            print("[切片进度] 正在提取图片...")
+
+            def extract_frame(args):
+                i, slice_time = args
+                frame_output = str(frames_dir / f"frame_{slice_time:04d}_{i + 1:04d}.{image_format}")
+                cmd_frame = [
+                    "ffmpeg",
+                    "-ss", str(slice_time),
+                    "-i", str(video_path),
+                    "-frames:v", "1",
+                    "-q:v", "2",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    frame_output,
+                ]
+                subprocess.run(cmd_frame, capture_output=True, timeout=10)
+                return i + 1
+
+            frame_args = [(i, i * interval) for i in range(frame_count)]
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = [executor.submit(extract_frame, args) for args in frame_args]
+                completed = 0
+                for _ in as_completed(futures):
+                    completed += 1
+                    if completed % 10 == 0 or completed == frame_count:
+                        print(f"\r[切片进度] 图片: {completed}/{frame_count}", end="")
+
+            print()
+
+            missing_frames = []
             for i in range(frame_count):
                 slice_time = i * interval
-                if slice_time not in existing_frames:
+                frame_path = frames_dir / f"frame_{slice_time:04d}_{i + 1:04d}.{image_format}"
+                if not frame_path.exists() or frame_path.stat().st_size == 0:
+                    missing_frames.append((i, slice_time))
+
+            if missing_frames:
+                print(f"[切片进度] 补全缺失图片: {len(missing_frames)} 张")
+                for i, slice_time in missing_frames:
                     frame_output = str(frames_dir / f"frame_{slice_time:04d}_{i + 1:04d}.{image_format}")
                     cmd_frame = [
                         "ffmpeg",
-                        "-ss",
-                        str(slice_time),
-                        "-i",
-                        str(video_path),
-                        "-frames:v",
-                        "1",
-                        "-q:v",
-                        "2",
+                        "-ss", str(slice_time),
+                        "-i", str(video_path),
+                        "-frames:v", "1",
+                        "-q:v", "2",
                         "-y",
+                        "-hide_banner",
+                        "-loglevel", "error",
                         frame_output,
                     ]
-                    subprocess.run(cmd_frame, capture_output=True, timeout=30)
+                    subprocess.run(cmd_frame, capture_output=True, timeout=10)
 
-            audio_count = int(duration / audio_interval) + 1
+            print()
+
+            print("[切片进度] 正在提取音频...")
+
+            def extract_audio(args):
+                i, slice_time = args
+                audio_output = str(audio_dir / f"audio_{slice_time:04d}_{i + 1:04d}.{audio_format}")
+                cmd_audio = [
+                    "ffmpeg",
+                    "-ss", str(slice_time),
+                    "-i", str(video_path),
+                    "-t", str(audio_interval),
+                    "-vn",
+                    "-c:a", audio_format,
+                    "-b:a", "128k",
+                    "-y",
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    audio_output,
+                ]
+                subprocess.run(cmd_audio, capture_output=True, timeout=10)
+                return i + 1
+
+            audio_args = [(i, i * audio_interval) for i in range(audio_count)]
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = [executor.submit(extract_audio, args) for args in audio_args]
+                completed = 0
+                for _ in as_completed(futures):
+                    completed += 1
+                    if completed % 5 == 0 or completed == audio_count:
+                        print(f"\r[切片进度] 音频: {completed}/{audio_count}", end="")
+
+            print()
+
+            missing_audios = []
             for i in range(audio_count):
                 slice_time = i * audio_interval
-                if slice_time not in existing_audios:
+                audio_path = audio_dir / f"audio_{slice_time:04d}_{i + 1:04d}.{audio_format}"
+                if not audio_path.exists() or audio_path.stat().st_size == 0:
+                    missing_audios.append((i, slice_time))
+
+            if missing_audios:
+                print(f"[切片进度] 补全缺失音频: {len(missing_audios)} 个")
+                for i, slice_time in missing_audios:
                     audio_output = str(audio_dir / f"audio_{slice_time:04d}_{i + 1:04d}.{audio_format}")
                     cmd_audio = [
                         "ffmpeg",
-                        "-ss",
-                        str(slice_time),
-                        "-i",
-                        str(video_path),
-                        "-t",
-                        str(audio_interval),
+                        "-ss", str(slice_time),
+                        "-i", str(video_path),
+                        "-t", str(audio_interval),
                         "-vn",
-                        "-c:a",
-                        audio_format,
-                        "-b:a",
-                        "128k",
+                        "-c:a", audio_format,
+                        "-b:a", "128k",
                         "-y",
+                        "-hide_banner",
+                        "-loglevel", "error",
                         audio_output,
                     ]
-                    subprocess.run(cmd_audio, capture_output=True, timeout=30)
+                    subprocess.run(cmd_audio, capture_output=True, timeout=10)
 
             print("最终切片完成")
 
@@ -404,7 +485,7 @@ class BilibiliVideoDownloader:
         audio_interval: int = 60,
         image_format: str = "jpg",
         audio_format: str = "aac",
-        format_id: Optional[str] = DEFAULT_FORMAT_ID,
+        format_id: Optional[str] = None,
         output_name: Optional[str] = None,
     ) -> Optional[Path]:
         """
@@ -452,7 +533,7 @@ class BilibiliVideoDownloader:
         print(f"图片目录: {frames_dir}")
         print(f"音频目录: {audio_dir}")
 
-        temp_video = output_dir / "stream.flv"
+        temp_video = output_dir / "stream.mp4"
         self._recording_done = False
 
         print("\n开始下载视频（边下载边切片）...")
@@ -468,12 +549,13 @@ class BilibiliVideoDownloader:
             if self.cookies_file.exists():
                 yt_cmd.insert(1, "--cookies")
                 yt_cmd.insert(2, str(self.cookies_file))
-            yt_cmd.extend(["-f", selected_format])
+            if selected_format:
+                yt_cmd.extend(["-f", selected_format])
             yt_cmd.extend(["--hls-prefer-ffmpeg"])
             yt_cmd.extend(["--hls-use-mpegts"])
             yt_cmd.extend(["--concurrent-fragments", "1"])
 
-            print(f"指定格式ID: {selected_format}")
+            print(f"指定格式ID: {selected_format if selected_format else '自动选择'}")
             print(f"命令: {' '.join(yt_cmd)}")
 
             slice_thread = threading.Thread(
@@ -526,10 +608,26 @@ class BilibiliVideoDownloader:
             if slice_thread:
                 slice_thread.join(timeout=30)
 
+            actual_video_path = None
+            for ext in [".mp4", ".flv", ".mkv", ".webm", ".mov"]:
+                candidate = output_dir / f"stream{ext}"
+                if candidate.exists():
+                    actual_video_path = candidate
+                    break
+            if not actual_video_path:
+                for f in output_dir.glob("stream*"):
+                    if f.is_file() and f.suffix in [".mp4", ".flv", ".mkv", ".webm", ".mov"]:
+                        actual_video_path = f
+                        break
+
+            if not actual_video_path:
+                actual_video_path = temp_video
+
+            print(f"[主线程] 使用视频文件: {actual_video_path}")
             print("[主线程] 最终完整切片...")
             actual_duration = elapsed if elapsed > 0 else 60
             self._final_slice(
-                str(temp_video), frames_dir, audio_dir, interval,
+                str(actual_video_path), frames_dir, audio_dir, interval,
                 image_format, audio_format, audio_interval,
                 actual_duration=actual_duration
             )
@@ -624,7 +722,7 @@ class BilibiliVideoDownloader:
         print(f"图片目录: {frames_dir}")
         print(f"音频目录: {audio_dir}")
 
-        video_path = output_dir / "video.flv"
+        video_path = output_dir / "video.mp4"
 
         try:
             selected_format = format_id if format_id else self.DEFAULT_FORMAT_ID
@@ -633,10 +731,11 @@ class BilibiliVideoDownloader:
             if self.cookies_file.exists():
                 yt_cmd.insert(1, "--cookies")
                 yt_cmd.insert(2, str(self.cookies_file))
-            yt_cmd.extend(["-f", selected_format])
+            if selected_format:
+                yt_cmd.extend(["-f", selected_format])
 
             print(f"\n第一步：下载视频")
-            print(f"指定格式ID: {selected_format}")
+            print(f"指定格式ID: {selected_format if selected_format else '自动选择'}")
             print(f"命令: {' '.join(yt_cmd)}")
             print("按 Ctrl+C 停止")
 
@@ -651,16 +750,30 @@ class BilibiliVideoDownloader:
             download_time = time.time() - start_time
             print(f"\n视频下载完成，耗时: {download_time:.1f}秒")
 
-            if video_path.exists():
-                file_size = video_path.stat().st_size
+            actual_video_path = None
+            for ext in [".mp4", ".flv", ".mkv", ".webm", ".mov"]:
+                candidate = output_dir / f"video{ext}"
+                if candidate.exists():
+                    actual_video_path = candidate
+                    break
+            if not actual_video_path:
+                for f in output_dir.glob("video*"):
+                    if f.is_file() and f.suffix in [".mp4", ".flv", ".mkv", ".webm", ".mov"]:
+                        actual_video_path = f
+                        break
+
+            if actual_video_path:
+                file_size = actual_video_path.stat().st_size
+                print(f"视频文件: {actual_video_path}")
                 print(f"视频文件大小: {file_size/(1024*1024):.1f}MB")
             else:
                 print("视频文件不存在")
+                print(f"输出目录内容: {list(output_dir.iterdir())}")
                 return None
 
             print("\n第二步：切片处理")
             self._final_slice(
-                str(video_path), frames_dir, audio_dir, interval,
+                str(actual_video_path), frames_dir, audio_dir, interval,
                 image_format, audio_format, audio_interval
             )
 
@@ -703,7 +816,7 @@ def main() -> None:
     parser.add_argument("--list-formats", "-l", type=str, help="查看B站视频可用格式列表")
     parser.add_argument("--video", "-d", type=str, help="开始B站视频下载并切片")
     parser.add_argument("--mode", "-m", type=str, choices=["streaming", "download"],
-                        default="streaming", help="下载模式：streaming（边下载边切）或 download（先下载后切）")
+                        default="download", help="下载模式：download（先下载后切，默认）或 streaming（边下载边切）")
     parser.add_argument("--format", "-f", type=str, help="指定视频格式ID")
     parser.add_argument("--interval", "-i", type=int, default=10, help="视频切片间隔（秒），默认10秒")
     parser.add_argument("--audio-interval", "-a", type=int, default=60, help="音频切片间隔（秒），默认60秒")

@@ -40,16 +40,16 @@ ffmpeg需单独安装：
 python bilibili_video_downloader.py --list-formats "https://www.bilibili.com/video/BV1xx411c7mZ/"
 ```
 
-### 边下载边切片（默认模式）
+### 先下载后切片（默认模式）
 
 ```bash
 python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1xx411c7mZ/"
 ```
 
-### 先下载后切片
+### 边下载边切片
 
 ```bash
-python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1xx411c7mZ/" --mode download
+python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1xx411c7mZ/" --mode streaming
 ```
 
 ### 自定义参数
@@ -74,7 +74,7 @@ python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1x
 |------|------|------|--------|------|
 | `--list-formats` | `-l` | str | - | 查看B站视频可用格式列表 |
 | `--video` | `-d` | str | - | B站视频地址 |
-| `--mode` | `-m` | str | streaming | 下载模式：`streaming`（边下载边切）或 `download`（先下载后切） |
+| `--mode` | `-m` | str | download | 下载模式：`download`（先下载后切，默认）或 `streaming`（边下载边切） |
 | `--format` | `-f` | str | best | 指定视频格式ID |
 | `--interval` | `-i` | int | 10 | 视频切片间隔（秒） |
 | `--audio-interval` | `-a` | int | 60 | 音频切片间隔（秒） |
@@ -131,7 +131,7 @@ python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1x
 ```
 video_downloads/
 └── video_20240101_120000/
-    ├── stream.flv              # 下载的视频文件
+    ├── video.mp4                # 下载的视频文件
     ├── frames/                 # 图片目录
     │   ├── frame_0000_0001.jpg
     │   ├── frame_0010_0002.jpg
