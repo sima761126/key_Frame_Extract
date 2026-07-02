@@ -25,7 +25,14 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Optional, List
-from tqdm import tqdm
+
+# 获取当前脚本所在目录：D:\keyFrameExtract\video
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# 获取上一级目录（项目根目录）：D:\keyFrameExtract
+project_root = os.path.dirname(current_dir)
+# 添加到系统路径
+sys.path.insert(0, project_root)  # 使用 insert(0) 确保优先级最高
+
 import config
 import json
 
