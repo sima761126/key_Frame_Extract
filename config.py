@@ -5,6 +5,7 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # 输出目录配置
 PICS_DIR = BASE_DIR / "pics"
+AUDIO_DIR = BASE_DIR / "audio"
 
 # 输出文件配置
 OUTPUT_FILES = {
@@ -17,7 +18,7 @@ OUTPUT_FILES = {
 
 # FFmpeg 视频帧提取配置
 FFMPEG_CONFIG = {
-    "output_pattern": "frame_%04d.jpg",  # 输出图片命名模式
+    "output_pattern": "temp_frame_%04d.jpg",  # 临时输出图片命名模式，后续会被重命名
     "vsync_mode": "vfr"          # 变帧率模式
 }
 
