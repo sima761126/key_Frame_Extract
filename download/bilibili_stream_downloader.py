@@ -117,6 +117,63 @@ class BilibiliLiveStreamer:
                 print(f"命令执行异常: {e}")
             return None
 
+    def _get_video_title(self, url: str) -> Optional[str]:
+        """获取B站直播标题作为默认输出名
+
+        Args:
+            url: B站直播地址
+
+        Returns:
+            Optional[str]: 直播标题，失败返回None
+        """
+        cmd = ["yt-dlp", "--get-title", url]
+        if self.cookies_file.exists():
+            cmd.insert(1, "--cookies")
+            cmd.insert(2, str(self.cookies_file))
+
+        try:
+            result = subprocess.run(cmd, capture_output=True)
+            if result.returncode == 0:
+                # 尝试多种编码方式解码，解决中文乱码问题
+                title = None
+                encodings = ['utf-8', 'gbk', 'gb2312', 'gb18030']
+                for encoding in encodings:
+                    try:
+                        title = result.stdout.decode(encoding).strip()
+                        # 验证解码结果是否包含有效字符
+                        if title and len(title.strip()) > 0:
+                            break
+                    except (UnicodeDecodeError, TypeError):
+                        continue
+
+                if not title:
+                    # 如果所有编码都失败，尝试使用系统默认编码
+                    import locale
+                    system_encoding = locale.getpreferredencoding(False)
+                    try:
+                        title = result.stdout.decode(system_encoding).strip()
+                    except (UnicodeDecodeError, TypeError):
+                        title = None
+
+                if title:
+                    # 清理标题中的非法字符，使其适合用作文件名
+                    import re
+                    # 删除换行符、制表符和其他不可见字符
+                    title = re.sub(r'[\n\r\t\v\f]', '', title)
+                    # 删除Windows文件系统不允许的字符
+                    title = re.sub(r'[<>:"/\\|?*]', '_', title)
+                    # 删除连续的下划线
+                    title = re.sub(r'_+', '_', title)
+                    # 删除首尾的下划线
+                    title = title.strip('_')
+                    # 限制长度
+                    title = title[:50] if len(title) > 50 else title
+                    return title if title else None
+            return None
+        except Exception as e:
+            print(f"获取直播标题失败: {e}")
+            return None
+
     def _kill_process_tree(self, proc: subprocess.Popen) -> None:
         """终止进程及其所有子进程
 
@@ -245,13 +302,29 @@ class BilibiliLiveStreamer:
         print(f"输出格式: MP4")
         print(f"{'='*60}")
 
-        video_name = output_name if output_name else f"live_{time.strftime('%Y%m%d_%H%M%S')}"
-        output_dir = self.download_dir / video_name
-        output_dir.mkdir(parents=True, exist_ok=True)
+        # 如果没有提供输出名称，则尝试获取直播标题
+        video_name = output_name
+        if not video_name:
+            title = self._get_video_title(url)
+            if title:
+                # 检查清理后的标题是否有效（至少2个字符且不是全空白）
+                valid_title = title.strip()
+                if len(valid_title) < 2:
+                    print(f"警告: 获取的标题 '{title}' 过短或无效，使用时间戳作为输出名")
+                    video_name = f"live_{time.strftime('%Y%m%d_%H%M%S')}"
+                else:
+                    video_name = title
+                    print(f"获取直播标题: {video_name}")
+            else:
+                video_name = f"live_{time.strftime('%Y%m%d_%H%M%S')}"
 
-        print(f"输出目录: {output_dir}")
+        # 确保下载目录存在
+        self.download_dir.mkdir(parents=True, exist_ok=True)
 
-        video_path = output_dir / "stream.mp4"
+        # 直接将视频保存为 title.mp4，不创建额外目录
+        video_path = self.download_dir / f"{video_name}.mp4"
+
+        print(f"输出文件: {video_path}")
 
         recording_proc: Optional[subprocess.Popen] = None
 
@@ -391,7 +464,12 @@ class BilibiliLiveStreamer:
         print(f"音频格式: {audio_format}")
         print(f"{'='*60}")
 
-        video_name = output_name if output_name else f"live_{time.strftime('%Y%m%d_%H%M%S')}"
+        # 如果没有提供输出名称，则尝试获取直播标题
+        video_name = output_name
+        if not video_name:
+            title = self._get_video_title(url)
+            video_name = title if title else f"live_{time.strftime('%Y%m%d_%H%M%S')}"
+
         output_dir = self.download_dir / video_name
         frames_dir = output_dir / "frames"
         audio_dir = output_dir / "audio"

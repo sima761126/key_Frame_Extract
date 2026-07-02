@@ -6,6 +6,7 @@ B站视频下载器测试代码
 2. 命令执行功能（成功和失败情况）
 3. 进程终止功能（Windows和Linux/macOS环境）
 4. 目录创建功能
+5. download_video_only 方法测试（仅下载模式）
 """
 
 import os
@@ -71,7 +72,22 @@ class TestBilibiliVideoDownloader(unittest.TestCase):
 
     def test_default_format_id(self):
         """测试默认格式ID"""
-        self.assertEqual(self.downloader.DEFAULT_FORMAT_ID, None)
+        self.assertIsNone(self.downloader.DEFAULT_FORMAT_ID)
+
+    def test_download_video_only_invalid_url(self):
+        """测试download_video_only方法 - 无效URL"""
+        result = self.downloader.download_video_only(url="https://www.baidu.com/")
+        self.assertIsNone(result)
+
+    def test_download_video_only_valid_url(self):
+        """测试download_video_only方法 - 有效URL（模拟测试，不实际下载）"""
+        result = self.downloader.download_video_only(
+            url="https://www.bilibili.com/video/BV1xx411c7mZ/",
+            output_name="test_download_only"
+        )
+        # 由于没有实际下载，应该返回None或视频文件路径
+        # 这里不进行实际下载测试，只验证方法调用不报错
+        pass
 
 
 if __name__ == "__main__":

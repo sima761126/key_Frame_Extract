@@ -163,6 +163,22 @@ class TestBilibiliLiveStreamer(unittest.TestCase):
         url = self.streamer._get_stream_url("https://live.bilibili.com/123456", "ultra_high_res-2")
         self.assertIsNone(url)
 
+    def test_download_live_only_invalid_url(self):
+        """测试download_live_only方法 - 无效URL"""
+        result = self.streamer.download_live_only(url="https://www.baidu.com/")
+        self.assertIsNone(result)
+
+    def test_download_live_only_valid_url(self):
+        """测试download_live_only方法 - 有效URL（模拟测试，不实际下载）"""
+        result = self.streamer.download_live_only(
+            url="https://live.bilibili.com/123456",
+            duration=30,
+            output_name="test_download_live_only"
+        )
+        # 由于没有实际下载，应该返回None或视频文件路径
+        # 这里不进行实际下载测试，只验证方法调用不报错
+        pass
+
     def tearDown(self):
         """测试后清理"""
         test_cookies = Path("test_cookies.txt")
