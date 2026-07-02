@@ -33,6 +33,7 @@ import argparse
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 import traceback
@@ -808,6 +809,117 @@ class BilibiliVideoDownloader:
             traceback.print_exc()
             return None
 
+    def download_video_only(
+        self,
+        url: str,
+        format_id: Optional[str] = None,
+        output_name: Optional[str] = None,
+    ) -> Optional[Path]:
+        """
+        只下载B站视频，不进行切片（输出MP4格式）
+
+        Args:
+            url: B站视频地址
+            format_id: 指定格式ID，默认使用best格式
+            output_name: 输出文件名前缀
+
+        Returns:
+            Optional[Path]: 视频文件路径，失败返回None
+        """
+        if not self._validate_url(url):
+            print(f"错误: URL '{url}' 不是有效的B站视频地址")
+            return None
+
+        print(f"\n{'='*60}")
+        print(f"开始B站视频下载（仅下载）: {url}")
+        print(f"输出格式: MP4")
+        print(f"{'='*60}")
+
+        video_name = output_name if output_name else f"video_{time.strftime('%Y%m%d_%H%M%S')}"
+        output_dir = self.download_dir / video_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        print(f"输出目录: {output_dir}")
+
+        video_path = output_dir / "video.mp4"
+
+        try:
+            selected_format = format_id if format_id else self.DEFAULT_FORMAT_ID
+
+            yt_cmd = [
+                "yt-dlp",
+                "-q",
+                "-o", str(video_path),
+                "--merge-output-format", "mp4",
+                url,
+            ]
+            if self.cookies_file.exists():
+                yt_cmd.insert(1, "--cookies")
+                yt_cmd.insert(2, str(self.cookies_file))
+            if selected_format:
+                yt_cmd.extend(["-f", selected_format])
+
+            print(f"\n开始下载视频")
+            print(f"指定格式ID: {selected_format if selected_format else '自动选择'}")
+            print(f"命令: {' '.join(yt_cmd)}")
+            print("按 Ctrl+C 停止")
+
+            start_time = time.time()
+            progress_bar_length = 40
+
+            download_proc = subprocess.Popen(yt_cmd)
+
+            while download_proc.poll() is None:
+                elapsed = time.time() - start_time
+                bar_filled = min(int(elapsed / 60 * progress_bar_length), progress_bar_length)
+                bar_empty = progress_bar_length - bar_filled
+
+                elapsed_min = int(elapsed // 60)
+                elapsed_sec = int(elapsed % 60)
+
+                file_size = 0
+                if video_path.exists():
+                    file_size = video_path.stat().st_size / (1024 * 1024)
+
+                progress_bar = f"[{'='*bar_filled}{' '*bar_empty}]"
+                progress_percent = f"({elapsed_min:02d}:{elapsed_sec:02d})"
+                size_info = f"{file_size:.1f}MB"
+
+                progress_line = f"\r进度: {progress_bar} {progress_percent} | 文件: {size_info}"
+                sys.stdout.write(progress_line)
+                sys.stdout.flush()
+
+                time.sleep(1)
+
+            download_time = time.time() - start_time
+
+            if download_proc.returncode != 0:
+                print(f"\n下载失败 (exit code: {download_proc.returncode})")
+                return None
+
+            if video_path.exists():
+                file_size = video_path.stat().st_size / (1024 * 1024)
+                print(f"\n视频下载完成，耗时: {download_time:.1f}秒")
+                print(f"视频文件: {video_path}")
+                print(f"视频文件大小: {file_size:.1f}MB")
+                return video_path
+            else:
+                print("视频文件不存在")
+                print(f"输出目录内容: {list(output_dir.iterdir())}")
+                return None
+
+        except KeyboardInterrupt:
+            print("\n用户中断")
+            if download_proc:
+                download_proc.terminate()
+                download_proc.wait(timeout=10)
+            return video_path if video_path.exists() else None
+
+        except Exception as e:
+            print(f"\n下载失败: {e}")
+            traceback.print_exc()
+            return None
+
 
 def main() -> None:
     """主函数：解析命令行参数并执行相应操作"""
@@ -817,6 +929,7 @@ def main() -> None:
     parser.add_argument("--video", "-d", type=str, help="开始B站视频下载并切片")
     parser.add_argument("--mode", "-m", type=str, choices=["streaming", "download"],
                         default="download", help="下载模式：download（先下载后切，默认）或 streaming（边下载边切）")
+    parser.add_argument("--download-only", action="store_true", help="仅下载视频，不进行切片（输出MP4格式）")
     parser.add_argument("--format", "-f", type=str, help="指定视频格式ID")
     parser.add_argument("--interval", "-i", type=int, default=10, help="视频切片间隔（秒），默认10秒")
     parser.add_argument("--audio-interval", "-a", type=int, default=60, help="音频切片间隔（秒），默认60秒")
@@ -832,7 +945,13 @@ def main() -> None:
     if args.list_formats:
         downloader.list_formats(args.list_formats)
     elif args.video:
-        if args.mode == "download":
+        if args.download_only:
+            downloader.download_video_only(
+                url=args.video,
+                format_id=args.format,
+                output_name=args.output,
+            )
+        elif args.mode == "download":
             downloader.download_and_slice_after(
                 url=args.video,
                 interval=args.interval,

@@ -6,10 +6,11 @@
 
 ## 功能概述
 
-B站视频下载与切片工具，支持两种处理流程：
+B站视频下载与切片工具，支持三种处理模式：
 
 1. **边下载边切片（streaming模式）**：使用yt-dlp下载视频到临时文件，独立线程定期用ffmpeg提取图片和音频
 2. **先下载后切片（download模式）**：先使用yt-dlp完整下载视频，下载完成后对整个视频进行切片
+3. **仅下载（download-only模式）**：只下载视频内容，不进行切片，输出MP4格式
 
 ---
 
@@ -52,6 +53,12 @@ python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1x
 python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1xx411c7mZ/" --mode streaming
 ```
 
+### 仅下载视频（不切片）
+
+```bash
+python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1xx411c7mZ/" --download-only
+```
+
 ### 自定义参数
 
 ```bash
@@ -75,6 +82,7 @@ python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1x
 | `--list-formats` | `-l` | str | - | 查看B站视频可用格式列表 |
 | `--video` | `-d` | str | - | B站视频地址 |
 | `--mode` | `-m` | str | download | 下载模式：`download`（先下载后切，默认）或 `streaming`（边下载边切） |
+| `--download-only` | - | bool | false | 仅下载视频，不进行切片（输出MP4格式） |
 | `--format` | `-f` | str | best | 指定视频格式ID |
 | `--interval` | `-i` | int | 10 | 视频切片间隔（秒） |
 | `--audio-interval` | `-a` | int | 60 | 音频切片间隔（秒） |
@@ -128,6 +136,8 @@ python bilibili_video_downloader.py --video "https://www.bilibili.com/video/BV1x
 
 ## 输出文件结构
 
+### 切片模式（streaming/download）
+
 ```
 video_downloads/
 └── video_20240101_120000/
@@ -142,6 +152,14 @@ video_downloads/
         ├── audio_0060_0002.aac
         ├── audio_0120_0003.aac
         └── ...
+```
+
+### 仅下载模式（download-only）
+
+```
+video_downloads/
+└── video_20240101_120000/
+    └── video.mp4                # 下载的视频文件（MP4格式）
 ```
 
 ---
@@ -177,6 +195,13 @@ output_dir = downloader.download_and_slice_after(
     output_name="my_video"
 )
 
+# 仅下载视频（不切片）
+video_path = downloader.download_video_only(
+    url="https://www.bilibili.com/video/BV1xx411c7mZ/",
+    format_id="best",
+    output_name="my_video"
+)
+
 # 查看格式列表
 downloader.list_formats("https://www.bilibili.com/video/BV1xx411c7mZ/")
 ```
@@ -191,6 +216,7 @@ downloader.list_formats("https://www.bilibili.com/video/BV1xx411c7mZ/")
 | `list_formats(url)` | 查看视频可用格式列表 |
 | `download_and_slice_streaming(url, interval, audio_interval, image_format, audio_format, format_id, output_name)` | 边下载边切片 |
 | `download_and_slice_after(url, interval, audio_interval, image_format, audio_format, format_id, output_name)` | 先下载后切片 |
+| `download_video_only(url, format_id, output_name)` | 仅下载视频，不切片（输出MP4格式） |
 
 ---
 
@@ -254,6 +280,10 @@ python get_bilibili_cookies.py --mode video
 ---
 
 ## 更新日志
+
+### v1.0.1
+- 新增仅下载模式（download-only），支持只下载视频不切片
+- 仅下载模式输出MP4格式
 
 ### v1.0.0
 - 初始版本
